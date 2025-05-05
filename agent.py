@@ -78,11 +78,15 @@ class RequestQueue:
     def get_result(self, request_id: str) -> Optional[str]:
         return self.results.get(request_id)
     
- # Add document type detection keywords   
+# Add document type detection keywords with specific affidavit types first
 DOCUMENT_TYPES = {
-    "contract": ["contract", "agreement", "deal", "partnership"],
+    "affidavit_ntsa": ["ntsa affidavit", "vehicle affidavit", "tims affidavit"],
+    "affidavit_name_change": ["name change affidavit", "change of name affidavit"],
+    "affidavit_custody": ["custody affidavit", "child custody affidavit"],
+    "affidavit_force_transfer": ["force transfer affidavit", "vehicle transfer affidavit"],
     "affidavit": ["affidavit", "sworn statement", "declaration", "oath"],
-    "other": ["letter", "notice", "memo", "document"]  # Fallback category
+    "contract": ["contract", "agreement", "deal", "partnership"],
+    "other": ["letter", "notice", "memo", "document"]
 }
 
 class DocumentGenerator:
