@@ -557,7 +557,7 @@ def show_welcome_modal():
     if st.session_state.show_welcome:
         with st.container():
             st.markdown(""" 
-            # 👋 Welcome!
+            # Welcome!
             
             Let's help you get started with generating your legal documents.
             """)
@@ -566,14 +566,14 @@ def show_welcome_modal():
             
             with col1:
                 st.markdown(""" 
-                ### 🚀 Quick Start
+                ### Quick Start
                 1. Type your request naturally
                 2. Wait for document generation
                 3. Review the document
                 4. Make payment via M-PESA
                 5. Download your document
                 
-                ### 💡 Example Prompts
+                ### Example Prompts
                 - "Draft a contract for web development services"
                 - "Create an affidavit for change of name"
                 - "Generate a stock transfer agreement"
@@ -581,7 +581,7 @@ def show_welcome_modal():
                 
             with col2:
                 st.markdown(""" 
-                ### ✨ Pro Tips
+                ### Pro Tips
                 - Be specific about parties involved
                 - Include key terms and conditions
                 - Mention important dates
@@ -606,7 +606,7 @@ def show_welcome_modal():
 
 def show_help_section():
     """Shows the comprehensive help section"""
-    with st.expander("📚 Help Guide", expanded=False):
+    with st.expander("Help Guide", expanded=False):
         tabs = st.tabs(["Document Types", "How to Use", "Best Practices", "FAQ"])
         
         with tabs[0]:
@@ -709,7 +709,7 @@ def show_help_section():
 def enhance_sidebar():
     """Enhanced sidebar with additional information"""
     with st.sidebar:
-        st.header("🎯 Document Quality Tips")
+        st.header("Document Quality Tips")
         st.info("""
         To get the best results:
         - Use clear, specific language
@@ -719,7 +719,7 @@ def enhance_sidebar():
         - Detail key terms
         """)
 
-        st.header("🛠️ Controls")
+        st.header("Controls")
         if not st.session_state.get("generation_in_progress", False):
             if st.button("Clear Chat History", key="clear_chat_button"):
                 st.session_state.messages = []
@@ -903,7 +903,16 @@ def format_document_html(content: str) -> str:
 
     
 def show_main_content():
-    st.title("📜 SmartClause")
+     # Get current theme
+    is_dark_mode = True if st.get_option("theme.base") == "dark" else False
+
+    # Choose logo based on theme
+    if is_dark_mode:
+        logo_path = "assets/smartclause_logo_light.png"
+    else:
+        logo_path = "assets/smartclause_logo_dark.png"
+
+    st.image(logo_path, width=300)
     st.caption("Generate professional legal documents compliant with Kenyan law")
 
     if st.session_state.show_welcome:
@@ -970,7 +979,7 @@ def show_main_content():
 def main():
     st.set_page_config(
         page_title="SmartClause",
-        page_icon="📜",
+        page_icon="assets/smartclause_badge.png",
         layout="wide"
     )
     
@@ -1080,6 +1089,7 @@ def main():
         display: block;
         width: 100%;
     }
+ 
     </style>
     """, unsafe_allow_html=True)
 
