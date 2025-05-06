@@ -794,7 +794,7 @@ def format_document_html(content: str) -> str:
             "REPUBLIC OF KENYA",
             "IN THE MATTER OF THE OATHS AND STATUTORY DECLARATIONS ACT",
             "(CAP 15 OF THE LAWS OF KENYA)",
-            "AFFIDAVIT"
+            "AFFIDAVIT",
         ]
         
         # Add title sections with class-based styling
@@ -828,7 +828,8 @@ def format_document_html(content: str) -> str:
                     if number:
                         html += f'{number}'
                     
-                    html += '<span style="font-weight: bold; text-decoration: underline;">THAT</span>'
+                    # Add space after "THAT" to ensure separation
+                    html += '<span style="font-weight: bold; text-decoration: underline;">THAT</span> '
                     
                     if is_bold:
                         html += f'<span style="font-weight: bold;">{clean_remainder}</span>'
@@ -853,7 +854,6 @@ def format_document_html(content: str) -> str:
                 else:
                     html += f'<p class="doc-paragraph">{clean_text}</p>'
     
-    # ... rest of your existing formatting code adapted to use classes ...
     elif doc_type == "contract":
         # Contract formatting with class-based styling
         paragraphs = content.split('\n\n')
@@ -897,7 +897,6 @@ def format_document_html(content: str) -> str:
             if para.strip():
                 html += f'<p class="doc-paragraph">{para.strip()}</p>'
     
-   
     html += '</div>'
     return html
 
