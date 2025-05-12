@@ -3,6 +3,9 @@ import logging
 from pathlib import Path
 from typing import Optional
 import os
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from agent import setup_environment, DocumentGenerator
 from mpesa_handler import MpesaHandler
 from font_setup import setup_fonts
@@ -15,7 +18,6 @@ import io
 import re
 import time
 from payment_verification import PaymentVerification, init_payment_state, update_payment_status, handle_download_request, reset_payment_state
-
 
 # Configure logging
 logging.basicConfig(
@@ -59,7 +61,6 @@ def init_session_state():
         st.warning("Some fonts are missing. Documents may not display correctly.")
     init_payment_state()
 
-
 class UnicodeAwarePDF(FPDF):
     def __init__(self):
         super().__init__()
@@ -69,7 +70,6 @@ class UnicodeAwarePDF(FPDF):
         self.set_auto_page_break(auto=True, margin=15)
     
     def multi_cell(self, w, h, txt, border=0, align='L', fill=False):
-        # Calculate text width and handle wrapping
         if w == 0:
             w = self.w - self.l_margin - self.r_margin
         wmax = (w - 2 * self.c_margin) * 1000 / self.font_size
@@ -88,25 +88,20 @@ class KenyanLegalDocument:
             '\u201D': '"',  # right double quote
             '\u2026': '...', # ellipsis
             '\u2022': '*',  # bullet point
-            # Add more replacements as needed
         }
         
-        # Replace known special characters
         for old, new in replacements.items():
             text = text.replace(old, new)
         
-        # Replace any remaining non-Latin1 characters with their closest ASCII equivalent
         cleaned_text = ''
         for char in text:
             try:
                 char.encode('latin-1')
                 cleaned_text += char
             except UnicodeEncodeError:
-                cleaned_text += ' '  # Replace unsupported chars with space
+                cleaned_text += ' '
                 
         return cleaned_text
-
-
 
 class LegalDocumentPDF(FPDF):
     def __init__(self):
@@ -128,28 +123,17 @@ class LegalDocumentPDF(FPDF):
         self.ln(5)
 
 def clean_markdown(text: str) -> tuple[str, bool]:
-    """
-    Remove markdown symbols except square brackets and return the clean text and whether it was bold
-    
-    Args:
-        text (str): Input text with potential markdown formatting
-    
-    Returns:
-        tuple[str, bool]: Cleaned text and a boolean indicating if it was bold
-    """
+    """Remove markdown symbols except square brackets and return the clean text and whether it was bold"""
     is_bold = False
     cleaned_text = text
     
-    # Remove markdown bold indicators
     if '**' in text:
         cleaned_text = text.replace('**', '')
         is_bold = True
     
-    # Remove other markdown formatting, excluding square brackets
     cleaned_text = re.sub(r'\\|\*', '', cleaned_text)
     cleaned_text = cleaned_text.replace('{.underline}', '')
     
-    # Specifically handle common problematic phrases
     special_phrases = {
         "NOW, THEREFOREE": "NOW, THEREFORE",
         "IN WITNESS WHEREOFF": "IN WITNESS WHEREOF"
@@ -168,10 +152,8 @@ def identify_document_type(content: str) -> str:
         return "contract"
     return "other"
 
-
 def format_affidavit_docx(doc, content: str):
     """Apply specific formatting for affidavit documents in DOCX"""
-    # Define title sections in correct order
     title_sections = [
         "REPUBLIC OF KENYA",
         "IN THE MATTER OF THE OATHS AND STATUTORY DECLARATIONS ACT",
@@ -179,7 +161,6 @@ def format_affidavit_docx(doc, content: str):
         "AFFIDAVIT"
     ]
     
-    # Add title sections in specified order
     for title in title_sections:
         para = doc.add_paragraph()
         run = para.add_run(title)
@@ -187,20 +168,17 @@ def format_affidavit_docx(doc, content: str):
         run.font.underline = True
         para.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
-    # Split content into paragraphs and process each
     paragraphs = content.split('\n\n')
     
     for para_text in paragraphs:
         if not para_text.strip():
             continue
             
-        # Skip title sections as they're already processed
         if any(title in para_text for title in title_sections):
             continue
         
         para = doc.add_paragraph()
         
-        # Handle "THAT" statements
         if "THAT" in para_text:
             match = re.match(r'(\d+\.\s+)?(\*\*)?THAT(\*\*)?(.+)', para_text)
             if match:
@@ -219,7 +197,6 @@ def format_affidavit_docx(doc, content: str):
                 if is_bold:
                     remainder_run.bold = True
         
-        # Handle sworn section
         elif "SWORN" in para_text:
             lines = para_text.split('\n')
             for line in lines:
@@ -230,7 +207,6 @@ def format_affidavit_docx(doc, content: str):
                     run.bold = True
                     sworn_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
         
-        # Handle regular paragraphs
         else:
             clean_text, is_bold = clean_markdown(para_text)
             run = para.add_run(clean_text)
@@ -248,7 +224,6 @@ def format_contract_docx(doc, content: str):
             
         para = doc.add_paragraph()
         
-        # Handle main title (only add once)
         if not title_added and ("CONTRACT" in para_text.upper() or "AGREEMENT" in para_text.upper()):
             title_para = doc.add_paragraph()
             title_run = title_para.add_run("CONTRACT AGREEMENT")
@@ -258,9 +233,7 @@ def format_contract_docx(doc, content: str):
             title_added = True
             continue
         
-        # Handle article titles and section headings
         if re.match(r'^ARTICLE\s+\d+:', para_text, re.IGNORECASE):
-            # Split the line into title and content
             parts = para_text.split(':', 1)
             if len(parts) == 2:
                 title, content = parts
@@ -272,13 +245,13 @@ def format_contract_docx(doc, content: str):
                 run.bold = True
         elif "WHEREAS:" in para_text:
             para.add_run("WHEREAS:").bold = True
-            para.add_run(para_text[8:])  # Add rest of text without bold
+            para.add_run(para_text[8:])
         elif "NOW, THEREFORE" in para_text:
             para.add_run("NOW, THEREFORE").bold = True
-            para.add_run(para_text[13:])  # Add rest of text without bold
+            para.add_run(para_text[13:])
         elif "IN WITNESS WHEREOF" in para_text:
             para.add_run("IN WITNESS WHEREOF").bold = True
-            para.add_run(para_text[17:])  # Add rest of text without bold
+            para.add_run(para_text[17:])
         else:
             clean_text, is_bold = clean_markdown(para_text)
             run = para.add_run(clean_text)
@@ -289,12 +262,10 @@ def convert_to_docx(content: str) -> bytes:
     """Convert text content to DOCX format with appropriate formatting"""
     doc = Document()
     
-    # Set default font
     style = doc.styles['Normal']
     style.font.name = 'Times New Roman'
     style.font.size = Pt(12)
     
-    # Identify document type and apply appropriate formatting
     doc_type = identify_document_type(content)
     
     if doc_type == "affidavit":
@@ -302,24 +273,16 @@ def convert_to_docx(content: str) -> bytes:
     elif doc_type == "contract":
         format_contract_docx(doc, content)
     else:
-        # Default formatting for other document types
         for para in content.split('\n\n'):
             if para.strip():
                 doc.add_paragraph(para.strip())
     
-    # Save to bytes
     buffer = io.BytesIO()
     doc.save(buffer)
     return buffer.getvalue()
 
-class LegalDocumentPDF(FPDF):
-    def init(self):
-        super().init()
-        self.add_page()
-
 def format_affidavit_pdf(pdf: FPDF, content: str):
     """Apply specific formatting for affidavit documents in PDF"""
-    # Define title sections in correct order
     title_sections = [
         "REPUBLIC OF KENYA",
         "IN THE MATTER OF THE OATHS AND STATUTORY DECLARATIONS ACT",
@@ -327,25 +290,21 @@ def format_affidavit_pdf(pdf: FPDF, content: str):
         "AFFIDAVIT"
     ]
     
-    # Add title sections
     for title in title_sections:
         pdf.set_font('Helvetica', 'BU', 13)
         pdf.cell(0, 10, title, ln=True, align='C')
     
     pdf.ln(10)
     
-    # Split content into paragraphs
     paragraphs = content.split('\n\n')
     
     for para_text in paragraphs:
         if not para_text.strip():
             continue
             
-        # Skip title sections as they're already processed
         if any(title in para_text for title in title_sections):
             continue
         
-        # Handle "THAT" statements
         if "THAT" in para_text:
             match = re.match(r'(\d+\.\s+)?(\*\*)?THAT(\*\*)?(.+)', para_text)
             if match:
@@ -363,7 +322,6 @@ def format_affidavit_pdf(pdf: FPDF, content: str):
                 pdf.set_font('Helvetica', 'B' if is_bold else '', 12)
                 pdf.multi_cell(0, 10, clean_remainder)
         
-        # Handle sworn section
         elif "SWORN" in para_text:
             lines = para_text.split('\n')
             for line in lines:
@@ -372,7 +330,6 @@ def format_affidavit_pdf(pdf: FPDF, content: str):
                     pdf.set_font('Helvetica', 'B', 12)
                     pdf.cell(0, 10, clean_line, ln=True)
         
-        # Handle regular paragraphs
         else:
             clean_text, is_bold = clean_markdown(para_text)
             pdf.set_font('Helvetica', 'B' if is_bold else '', 12)
@@ -389,7 +346,6 @@ def format_contract_pdf(pdf: FPDF, content: str):
         if not para_text.strip():
             continue
             
-        # Handle main title (only add once)
         if not title_added and ("CONTRACT" in para_text.upper() or "AGREEMENT" in para_text.upper()):
             pdf.set_font('Helvetica', 'BU', 14)
             pdf.cell(0, 10, "CONTRACT AGREEMENT", ln=True, align='C')
@@ -397,17 +353,13 @@ def format_contract_pdf(pdf: FPDF, content: str):
             title_added = True
             continue
         
-        # Handle article titles and section headings
         if re.match(r'^ARTICLE\s+\d+:', para_text, re.IGNORECASE):
             parts = para_text.split(':', 1)
             if len(parts) == 2:
                 title, content = parts
-                # Print title in bold
                 pdf.set_font('Helvetica', 'B', 12)
                 pdf.write(10, title + ':')
-                # Print content in normal font
                 pdf.set_font('Helvetica', '', 12)
-                # Use write for inline content
                 pdf.multi_cell(0, 10, content)
             else:
                 pdf.set_font('Helvetica', 'B', 12)
@@ -441,7 +393,6 @@ def convert_to_pdf(content: str) -> bytes:
     pdf.set_margins(25, 25, 25)
     pdf.set_auto_page_break(auto=True, margin=25)
     
-    # Identify document type and apply appropriate formatting
     doc_type = identify_document_type(content)
     
     try:
@@ -450,7 +401,6 @@ def convert_to_pdf(content: str) -> bytes:
         elif doc_type == "contract":
             format_contract_pdf(pdf, content)
         else:
-            # Default formatting for other document types
             pdf.set_font('Helvetica', '', 12)
             for para in content.split('\n\n'):
                 if para.strip():
@@ -461,21 +411,18 @@ def convert_to_pdf(content: str) -> bytes:
     except Exception as e:
         logging.error(f"PDF generation error: {str(e)}")
         raise RuntimeError(f"Failed to generate PDF: {str(e)}")
-    
+
 def show_download_buttons():
     """Display persistent download buttons for the document"""
     if st.session_state.show_download and st.session_state.current_document:
-        # Create payment verifier
         payment_verifier = PaymentVerification(st.session_state.mpesa)
         
         try:
-            # First row for payment status
             if not st.session_state.payment_verified:
                 st.warning("⚠️ Payment required before download")
             else:
                 st.success("✅ Payment verified")
             
-            # Second row for download buttons
             st.markdown("### Download Options")
             col1, col2 = st.columns(2)
             
@@ -522,36 +469,26 @@ def generate_document(generator: DocumentGenerator, prompt: str) -> tuple[Option
         logger.error(f"Error during document generation: {e}")
         return "An unexpected error occurred. Please check your input and try again.", False
 
-
 def validate_phone_number(phone: str) -> bool:
     """Validate the phone number format"""
     return phone.startswith("254") and len(phone) == 12 and phone.isdigit()
+
 class DocumentPricing:
     """Handles pricing logic for different document types"""
-    
     PRICES = {
         "affidavit": 3000,
         "contract": 5000,
-        "other": 5000  # Default price for unrecognized document types
+        "other": 5000
     }
     
     @staticmethod
     def get_document_price(content: str) -> int:
-        """
-        Determine the price based on document type
-        
-        Args:
-            content (str): The document content to analyze
-            
-        Returns:
-            int: Price in KES
-        """
         if "OATHS AND STATUTORY DECLARATIONS ACT" in content:
             return DocumentPricing.PRICES["affidavit"]
         elif "CONTRACT" in content.upper() or "AGREEMENT" in content.upper():
             return DocumentPricing.PRICES["contract"]
         return DocumentPricing.PRICES["other"]
-    
+
 def show_welcome_modal():
     """Shows a welcome modal with updated quick start guide"""
     if st.session_state.show_welcome:
@@ -593,21 +530,43 @@ def show_welcome_modal():
                 - Documents are compliant with Kenyan law
                 """)
 
-            # Only show the button if no generation is in progress
             if not st.session_state.get("generation_in_progress", False):
                 if st.button("Got it!", key="welcome_close"):
                     st.session_state.show_welcome = False
-                    # Only rerun if no document generation is in progress
                     if not st.session_state.get("generation_in_progress", False):
                         st.rerun()
             else:
-                # Show disabled button during generation
                 st.button("Got it!", key="welcome_close", disabled=True)
 
+def send_feedback_email(feedback: str, user_email: str = ""):
+    """Send feedback email to smartclause6@gmail.com"""
+    email_address = os.environ.get('EMAIL_ADDRESS')
+    email_password = os.environ.get('EMAIL_PASSWORD')
+    
+    if not email_address or not email_password:
+        raise ValueError("Email credentials are not set. Please configure EMAIL_ADDRESS and EMAIL_PASSWORD environment variables.")
+    
+    msg = MIMEMultipart()
+    msg['From'] = email_address
+    msg['To'] = "smartclause6@gmail.com"
+    msg['Subject'] = "User Feedback"
+    
+    body = f"Feedback:\n{feedback}\n\nFrom: {user_email if user_email else 'Anonymous'}"
+    msg.attach(MIMEText(body, 'plain'))
+    
+    try:
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(email_address, email_password)
+        server.send_message(msg)
+        server.quit()
+    except Exception as e:
+        raise Exception(f"Error sending email: {str(e)}")
+
 def show_help_section():
-    """Shows the comprehensive help section"""
+    """Shows the comprehensive help section with feedback tab"""
     with st.expander("Help Guide", expanded=False):
-        tabs = st.tabs(["Document Types", "How to Use", "Best Practices", "FAQ"])
+        tabs = st.tabs(["Document Types", "How to Use", "Best Practices", "FAQ", "Feedback"])
         
         with tabs[0]:
             st.markdown("""
@@ -704,7 +663,23 @@ def show_help_section():
                 Email: support@smartclause.co.ke
                 Call: +254 XXX XXX XXX
             """)
-
+            
+        with tabs[4]:
+            st.subheader("Send us your feedback")
+            with st.form("feedback_form"):
+                feedback = st.text_area("Your feedback:", height=150)
+                user_email = st.text_input("Your email (optional):")
+                submitted = st.form_submit_button("Send Feedback")
+                
+                if submitted:
+                    if feedback:
+                        try:
+                            send_feedback_email(feedback, user_email)
+                            st.success("Thank you for your feedback!")
+                        except Exception as e:
+                            st.error(f"Failed to send feedback: {str(e)}")
+                    else:
+                        st.warning("Please enter your feedback before submitting.")
 
 def enhance_sidebar():
     """Enhanced sidebar with additional information"""
@@ -758,13 +733,11 @@ def enhance_sidebar():
 
 def format_document_html(content: str) -> str:
     """Convert document content to formatted HTML for display in the web interface with theme awareness"""
-    # Add debug logging
     logger.info(f"Full document content length: {len(content)}")
     logger.info(f"First 200 characters: {content[:200]}")
 
     doc_type = identify_document_type(content)
     
-    # Modify the base HTML to ensure full visibility
     html = f"""
     <div class="legal-document" style="
         font-family: 'Times New Roman', serif; 
@@ -787,9 +760,7 @@ def format_document_html(content: str) -> str:
     </style>
     """
     
-    # Rest of your document formatting code with class-based styling
     if doc_type == "affidavit":
-        # Title sections
         title_sections = [
             "REPUBLIC OF KENYA",
             "IN THE MATTER OF THE OATHS AND STATUTORY DECLARATIONS ACT",
@@ -797,13 +768,11 @@ def format_document_html(content: str) -> str:
             "AFFIDAVIT",
         ]
         
-        # Add title sections with class-based styling
         for title in title_sections:
             html += f'<h6 class="doc-title" style="text-align: center; font-weight: bold; text-decoration: underline; color: var(--document-text-color, #000000); opacity: 1;">{title}</h6>'
         
         html += '<div style="margin-top: 14px; "></div>'
         
-        # Process paragraphs
         paragraphs = content.split('\n\n')
         
         for para_text in paragraphs:
@@ -811,11 +780,9 @@ def format_document_html(content: str) -> str:
             if not para_text:
                 continue
                 
-            # Skip title sections as they're already processed
             if any(title in para_text for title in title_sections):
                 continue
             
-            # Handle "THAT" statements
             if "THAT" in para_text:
                 match = re.match(r'(\d+\.\s+)?(\*\*)?THAT(\*\*)?(.+)', para_text)
                 if match:
@@ -828,7 +795,6 @@ def format_document_html(content: str) -> str:
                     if number:
                         html += f'{number}'
                     
-                    # Add space after "THAT" to ensure separation
                     html += '<span style="font-weight: bold; text-decoration: underline;">THAT</span> '
                     
                     if is_bold:
@@ -838,7 +804,6 @@ def format_document_html(content: str) -> str:
                     
                     html += '</p>'
             
-            # Handle sworn section
             elif "SWORN" in para_text:
                 lines = para_text.split('\n')
                 for line in lines:
@@ -846,7 +811,6 @@ def format_document_html(content: str) -> str:
                     if clean_line:
                         html += f'<p class="doc-paragraph" style="font-weight: bold;">{clean_line}</p>'
             
-            # Handle regular paragraphs
             else:
                 clean_text, is_bold = clean_markdown(para_text)
                 if is_bold:
@@ -855,7 +819,6 @@ def format_document_html(content: str) -> str:
                     html += f'<p class="doc-paragraph">{clean_text}</p>'
     
     elif doc_type == "contract":
-        # Contract formatting with class-based styling
         paragraphs = content.split('\n\n')
         title_added = False
         
@@ -864,13 +827,11 @@ def format_document_html(content: str) -> str:
             if not para_text:
                 continue
                 
-            # Handle main title (only add once)
             if not title_added and ("CONTRACT" in para_text.upper() or "AGREEMENT" in para_text.upper()):
                 html += '<h6 class="doc-title" style="text-align: center; font-weight: bold; text-decoration: underline; color: var(--document-text-color, #000000); opacity: 1;">CONTRACT AGREEMENT</h6>'
                 title_added = True
                 continue
             
-            # Handle article titles and section headings
             if re.match(r'^ARTICLE\s+\d+:', para_text, re.IGNORECASE):
                 parts = para_text.split(':', 1)
                 if len(parts) == 2:
@@ -892,7 +853,6 @@ def format_document_html(content: str) -> str:
                     html += f'<p class="doc-paragraph">{clean_text}</p>'
     
     else:
-        # Default formatting for other document types
         for para in content.split('\n\n'):
             if para.strip():
                 html += f'<p class="doc-paragraph">{para.strip()}</p>'
@@ -900,13 +860,8 @@ def format_document_html(content: str) -> str:
     html += '</div>'
     return html
 
-
-    
 def show_main_content():
-     # Get current theme
     is_dark_mode = True if st.get_option("theme.base") == "dark" else False
-
-    # Choose logo based on theme
     if is_dark_mode:
         logo_path = "assets/smartclause_logo_light.png"
     else:
@@ -919,7 +874,6 @@ def show_main_content():
         show_welcome_modal()
     show_help_section()
     
-    # Display chat interface
     chat_container = st.container()
     
     with chat_container:
@@ -928,17 +882,14 @@ def show_main_content():
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
     
-    # If document is generated, display it separately
     if st.session_state.document_generated_successfully and st.session_state.current_document:
         st.markdown('<div class="document-preview">', unsafe_allow_html=True)
         st.markdown(format_document_html(st.session_state.current_document), unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     
-    # Display download buttons if applicable
     if st.session_state.show_download and st.session_state.current_document:
         show_download_buttons()
 
-    # Chat input
     if prompt := st.chat_input("Describe your legal document needs, e.g., 'Draft a contract for...'"):
         if st.session_state.show_welcome:
             st.session_state.show_welcome = False
@@ -951,7 +902,6 @@ def show_main_content():
         with st.chat_message("assistant"):
             response_placeholder = st.empty()
             
-            # Set the flag before generation
             st.session_state.generation_in_progress = True
             
             try:
@@ -964,7 +914,6 @@ def show_main_content():
                 else:
                     response_placeholder.markdown(preview)
             finally:
-                # Reset the flag after generation, even if it fails
                 st.session_state.generation_in_progress = False
 
             st.session_state.messages.append({"role": "assistant", "content": preview})
@@ -975,7 +924,8 @@ def show_main_content():
                 st.session_state.show_download = True
                 st.session_state.force_sidebar_open = True
                 show_download_buttons()
-                st.rerun()  # Re-render to ensure sidebar is visible
+                st.rerun()
+
 def main():
     st.set_page_config(
         page_title="SmartClause",
@@ -985,14 +935,12 @@ def main():
     
     init_session_state()
     
-
     st.markdown("""
     <style>
      .title-container {
         text-align: center;
     }
     
-    /* Scoped payment card styling */
     div[data-testid="stSidebar"] .payment-card {
         position: relative !important;
         bottom: auto;
@@ -1005,7 +953,6 @@ def main():
         margin-bottom: 20px;
     }
     
-    /* Text protection styles */
     .stMarkdown, 
     .element-container div,
     .stChatMessage {
@@ -1037,7 +984,6 @@ def main():
         display: none !important;
     }
     
-    /* Legal document styling */
     .legal-document {
         background-color: white;
         border: 1px solid #ddd;
@@ -1045,7 +991,6 @@ def main():
         padding: 30px !important;
         margin: 15px 0;
         border-radius: 8px;
-                
     }
     
     .legal-document h1, .legal-document h2 {
@@ -1069,19 +1014,16 @@ def main():
         height: auto !important;
     }
 
-    /* Ensure full document visibility */
     .stMarkdown,
     .stChatMessage div[data-testid="stMarkdownContainer"] {
         max-height: none !important;
         overflow: visible !important;
     }
 
-    /* Additional global overrides */
     * {
         max-height: none !important;
     }
 
-    /* Specific document container styling */
     .legal-document {
         max-height: none !important;
         height: auto !important;
@@ -1089,7 +1031,6 @@ def main():
         display: block;
         width: 100%;
     }
- 
     </style>
     """, unsafe_allow_html=True)
 
