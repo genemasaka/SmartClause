@@ -1,5 +1,7 @@
 import streamlit as st
 import logging
+import json
+import uuid
 from pathlib import Path
 from typing import Optional
 import os
@@ -21,12 +23,17 @@ import html
 import bleach
 from payment_verification import PaymentVerification, init_payment_state, update_payment_status, handle_download_request, reset_payment_state
 
-# Configure logging
+# Configure structured logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+handler = logging.StreamHandler()
+handler.setFormatter(logging.Formatter(
+    '{"timestamp": "%(asctime)s", "name": "%(name)s", "level": "%(levelname)s", "message": %(message)s}'
+))
+logger.handlers = [handler]
 
 def init_session_state():
     """Initialize session state variables"""
@@ -36,13 +43,13 @@ def init_session_state():
         try:
             template_manager, model = setup_environment()
             st.session_state.generator = DocumentGenerator(template_manager, model)
-            logger.info("Document generator initialized successfully")
+            logger.info('{"event": "generator_initialized", "status": "success"}')
         except Exception as e:
-            logger.error(f"Failed to initialize document generator: {e}")
-            st.error("Failed to initialize the application. Please check your configuration.")
+            logger.error('{"event": "generator_init_failed", "error": "%s"}', str(e), exc_info=True)
+            st.error("Unable to initialize the application. Please try again later. If this issue persists, please report it using the Feedback tab in the Help Guide.")
     if "mpesa" not in st.session_state:
         st.session_state.mpesa = MpesaHandler()
-        logger.info("Mpesa handler initialized successfully")
+        logger.info('{"event": "mpesa_handler_initialized", "status": "success"}')
     if "document_generated_successfully" not in st.session_state:
         st.session_state.document_generated_successfully = False
     if "show_welcome" not in st.session_state:
@@ -57,8 +64,10 @@ def init_session_state():
         st.session_state.show_payment = False
     if "show_download" not in st.session_state:
         st.session_state.show_download = False
-    if "force_sidebar_open" not in st.session_state: 
+    if "force_sidebar_open" not in st.session_state:
         st.session_state.force_sidebar_open = False
+    if "session_id" not in st.session_state:
+        st.session_state.session_id = str(uuid.uuid4())
     if not setup_fonts():
         st.warning("Some fonts are missing. Documents may not display correctly.")
     init_payment_state()
@@ -152,7 +161,7 @@ class UnicodeAwarePDF(FPDF):
         self.set_font('DejaVu', size=11)
         self.set_auto_page_break(auto=True, margin=15)
     
-def multi_cell(self, w, h, txt, border=0, align='L', fill=False):
+    def multi_cell(self, w, h, txt, border=0, align='L', fill=False):
         if w == 0:
             w = self.w - self.l_margin - self.r_margin
         wmax = (w - 2 * self.c_margin) * 1000 / self.font_size
@@ -344,26 +353,31 @@ def format_contract_docx(doc, content: str):
 
 def convert_to_docx(content: str) -> bytes:
     """Convert text content to DOCX format with appropriate formatting"""
-    doc = Document()
-    
-    style = doc.styles['Normal']
-    style.font.name = 'Times New Roman'
-    style.font.size = Pt(12)
-    
-    doc_type = identify_document_type(content)
-    
-    if doc_type == "affidavit":
-        format_affidavit_docx(doc, content)
-    elif doc_type == "contract":
-        format_contract_docx(doc, content)
-    else:
-        for para in content.split('\n\n'):
-            if para.strip():
-                doc.add_paragraph(para.strip())
-    
-    buffer = io.BytesIO()
-    doc.save(buffer)
-    return buffer.getvalue()
+    session_id = st.session_state.get("session_id", "unknown")
+    try:
+        doc = Document()
+        style = doc.styles['Normal']
+        style.font.name = 'Times New Roman'
+        style.font.size = Pt(12)
+        doc_type = identify_document_type(content)
+        
+        if doc_type == "affidavit":
+            format_affidavit_docx(doc, content)
+        elif doc_type == "contract":
+            format_contract_docx(doc, content)
+        else:
+            for para in content.split('\n\n'):
+                if para.strip():
+                    doc.add_paragraph(para.strip())
+        
+        buffer = io.BytesIO()
+        doc.save(buffer)
+        logger.info('{"event": "docx_conversion", "session_id": "%s", "doc_type": "%s", "status": "success"}', session_id, doc_type)
+        return buffer.getvalue()
+    except Exception as e:
+        logger.error('{"event": "docx_conversion_failed", "session_id": "%s", "error": "%s"}', session_id, str(e), exc_info=True)
+        st.error("Failed to generate DOCX document. Please try again later. If this issue persists, please report it using the Feedback tab in the Help Guide.")
+        return None
 
 def format_affidavit_pdf(pdf: FPDF, content: str):
     """Apply specific formatting for affidavit documents in PDF"""
@@ -397,10 +411,10 @@ def format_affidavit_pdf(pdf: FPDF, content: str):
                 
                 pdf.set_font('Helvetica', '', 12)
                 if number:
-                    pdf.write(10, number)
+                    pdf.cell(10, number)
                 
                 pdf.set_font('Helvetica', 'BU', 12)
-                pdf.write(10, "THAT ")
+                pdf.cell(10, "THAT ")
                 
                 clean_remainder, is_bold = clean_markdown(remainder)
                 pdf.set_font('Helvetica', 'B' if is_bold else '', 12)
@@ -442,7 +456,7 @@ def format_contract_pdf(pdf: FPDF, content: str):
             if len(parts) == 2:
                 title, content = parts
                 pdf.set_font('Helvetica', 'B', 12)
-                pdf.write(10, title + ':')
+                pdf.cell(10, title + ':')
                 pdf.set_font('Helvetica', '', 12)
                 pdf.multi_cell(0, 10, content)
             else:
@@ -450,17 +464,17 @@ def format_contract_pdf(pdf: FPDF, content: str):
                 pdf.multi_cell(0, 10, para_text)
         elif "WHEREAS:" in para_text:
             pdf.set_font('Helvetica', 'B', 12)
-            pdf.write(10, "WHEREAS:")
+            pdf.cell(10, "WHEREAS:")
             pdf.set_font('Helvetica', '', 12)
             pdf.multi_cell(0, 10, para_text[8:])
         elif "NOW, THEREFORE" in para_text:
             pdf.set_font('Helvetica', 'B', 12)
-            pdf.write(10, "NOW, THEREFORE")
+            pdf.cell(10, "NOW, THEREFORE")
             pdf.set_font('Helvetica', '', 12)
             pdf.multi_cell(0, 10, para_text[13:])
         elif "IN WITNESS WHEREOF" in para_text:
             pdf.set_font('Helvetica', 'B', 12)
-            pdf.write(10, "IN WITNESS WHEREOF")
+            pdf.cell(10, "IN WITNESS WHEREOF")
             pdf.set_font('Helvetica', '', 12)
             pdf.multi_cell(0, 10, para_text[17:])
         else:
@@ -472,14 +486,15 @@ def format_contract_pdf(pdf: FPDF, content: str):
 
 def convert_to_pdf(content: str) -> bytes:
     """Convert document content to PDF with appropriate formatting"""
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_margins(25, 25, 25)
-    pdf.set_auto_page_break(auto=True, margin=25)
-    
-    doc_type = identify_document_type(content)
-    
+    session_id = st.session_state.get("session_id", "unknown")
     try:
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_margins(25, 25, 25)
+        pdf.set_auto_page_break(auto=True, margin=25)
+        
+        doc_type = identify_document_type(content)
+        
         if doc_type == "affidavit":
             format_affidavit_pdf(pdf, content)
         elif doc_type == "contract":
@@ -491,13 +506,17 @@ def convert_to_pdf(content: str) -> bytes:
                     pdf.multi_cell(0, 10, para.strip())
                     pdf.ln(5)
         
-        return pdf.output(dest='S').encode('latin-1')
+        pdf_data = pdf.output(dest='S').encode('latin-1')
+        logger.info('{"event": "pdf_conversion", "session_id": "%s", "doc_type": "%s", "status": "success"}', session_id, doc_type)
+        return pdf_data
     except Exception as e:
-        logging.error(f"PDF generation error: {str(e)}")
-        raise RuntimeError(f"Failed to generate PDF: {str(e)}")
+        logger.error('{"event": "pdf_conversion_failed", "session_id": "%s", "error": "%s"}', session_id, str(e), exc_info=True)
+        st.error("Failed to generate PDF document. Please try again later. If this issue persists, please report it using the Feedback tab in the Help Guide.")
+        return None
 
 def show_download_buttons():
     """Display persistent download buttons for the document"""
+    session_id = st.session_state.get("session_id", "unknown")
     if st.session_state.show_download and st.session_state.current_document:
         payment_verifier = PaymentVerification(st.session_state.mpesa)
         
@@ -514,48 +533,61 @@ def show_download_buttons():
                 if st.button("Download as DOCX", key="download_docx_button"):
                     if handle_download_request(payment_verifier):
                         docx_data = convert_to_docx(st.session_state.current_document)
-                        st.download_button(
-                            label="Click to download DOCX",
-                            data=docx_data,
-                            file_name="document.docx",
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            key="docx_download"
-                        )
+                        if docx_data:
+                            st.download_button(
+                                label="Click to download DOCX",
+                                data=docx_data,
+                                file_name="document.docx",
+                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                key="docx_download"
+                            )
+                        else:
+                            logger.error('{"event": "docx_download_failed", "session_id": "%s", "reason": "conversion_failed"}', session_id)
             
             with col2:
                 if st.button("Download as PDF", key="download_pdf_button"):
                     if handle_download_request(payment_verifier):
                         pdf_data = convert_to_pdf(st.session_state.current_document)
-                        st.download_button(
-                            label="Click to download PDF",
-                            data=pdf_data,
-                            file_name="document.pdf",
-                            mime="application/pdf",
-                            key="pdf_download"
-                        )
+                        if pdf_data:
+                            st.download_button(
+                                label="Click to download PDF",
+                                data=pdf_data,
+                                file_name="document.pdf",
+                                mime="application/pdf",
+                                key="pdf_download"
+                            )
+                        else:
+                            logger.error('{"event": "pdf_download_failed", "session_id": "%s", "reason": "conversion_failed"}', session_id)
                 
         except Exception as e:
-            st.error(f"Error preparing download: {str(e)}")
-            logging.error(f"Download preparation error: {str(e)}", exc_info=True)
+            logger.error('{"event": "download_preparation_failed", "session_id": "%s", "error": "%s"}', session_id, str(e), exc_info=True)
+            st.error("An error occurred while preparing the download. Please try again later. If this issue persists, please report it using the Feedback tab in the Help Guide.")
 
 def generate_document(generator: DocumentGenerator, prompt: str) -> tuple[Optional[str], bool]:
+    session_id = st.session_state.get("session_id", "unknown")
     try:
         response = generator.generate_document(prompt)
         if response:
             st.session_state.current_document = response
             st.session_state.document_price = DocumentPricing.get_document_price(response)
             reset_payment_state()
+            logger.info('{"event": "document_generated", "session_id": "%s", "doc_type": "%s", "status": "success"}', 
+                        session_id, identify_document_type(response))
             return response, True
         else:
-            logger.error("No response received from the backend.")
-            return "An error occurred while generating the document. Please check your input and try again.", False
+            logger.error('{"event": "document_generation_failed", "session_id": "%s", "reason": "no_response"}', session_id)
+            return "Unable to generate the document. Please try again with a different prompt. If this issue persists, please report it using the Feedback tab in the Help Guide.", False
     except Exception as e:
-        logger.error(f"Error during document generation: {e}")
-        return "An unexpected error occurred. Please check your input and try again.", False
+        logger.error('{"event": "document_generation_error", "session_id": "%s", "error": "%s"}', session_id, str(e), exc_info=True)
+        return "An error occurred while generating the document. Please try again later. If this issue persists, please report it using the Feedback tab in the Help Guide.", False
 
 def validate_phone_number(phone: str) -> bool:
     """Validate the phone number format"""
-    return phone.startswith("254") and len(phone) == 12 and phone.isdigit()
+    session_id = st.session_state.get("session_id", "unknown")
+    if phone.startswith("254") and len(phone) == 12 and phone.isdigit():
+        return True
+    logger.warning('{"event": "invalid_phone_number", "session_id": "%s", "phone_length": %d}', session_id, len(phone))
+    return False
 
 class DocumentPricing:
     """Handles pricing logic for different document types"""
@@ -624,11 +656,13 @@ def show_welcome_modal():
 
 def send_feedback_email(feedback: str, user_email: str = ""):
     """Send feedback email to smartclause6@gmail.com"""
+    session_id = st.session_state.get("session_id", "unknown")
     email_address = os.environ.get('EMAIL_ADDRESS')
     email_password = os.environ.get('EMAIL_PASSWORD')
     
     if not email_address or not email_password:
-        raise ValueError("Email credentials are not set. Please configure EMAIL_ADDRESS and EMAIL_PASSWORD environment variables.")
+        logger.error('{"event": "email_config_missing", "session_id": "%s"}', session_id)
+        raise ValueError("Email configuration is missing. Please contact support.")
     
     msg = MIMEMultipart()
     msg['From'] = email_address
@@ -644,8 +678,10 @@ def send_feedback_email(feedback: str, user_email: str = ""):
         server.login(email_address, email_password)
         server.send_message(msg)
         server.quit()
+        logger.info('{"event": "feedback_email_sent", "session_id": "%s", "status": "success"}', session_id)
     except Exception as e:
-        raise Exception(f"Error sending email: {str(e)}")
+        logger.error('{"event": "feedback_email_failed", "session_id": "%s", "error": "%s"}', session_id, str(e), exc_info=True)
+        raise Exception("Failed to send feedback. Please try again later. If this issue persists, please report it using the Feedback tab in the Help Guide.")
 
 def show_help_section():
     """Shows the comprehensive help section with feedback tab"""
@@ -758,16 +794,16 @@ def show_help_section():
                 if submitted:
                     if feedback:
                         if user_email and not validate_input(user_email, 'email'):
-                            st.error("Invalid email format.")
+                            st.error("Invalid email format. If this issue persists, please report it using the Feedback tab in the Help Guide.")
                         elif not validate_input(feedback, 'feedback'):
-                            st.error("Feedback must be less than 2000 characters.")
+                            st.error("Feedback must be less than 2000 characters. If this issue persists, please report it using the Feedback tab in the Help Guide.")
                         else:
                             sanitized_feedback = sanitize_text(feedback)
                             try:
                                 send_feedback_email(sanitized_feedback, user_email)
                                 st.success("Thank you for your feedback!")
                             except Exception as e:
-                                st.error(f"Failed to send feedback: {str(e)}")
+                                st.error("Failed to send feedback. Please try again later. If this issue persists, please report it using the Feedback tab in the Help Guide.")
                     else:
                         st.warning("Please enter your feedback before submitting.")
 
@@ -793,6 +829,7 @@ def enhance_sidebar():
                 st.session_state.show_download = False
                 st.session_state.current_document = None
                 st.session_state.force_sidebar_open = False
+                logger.info('{"event": "chat_history_cleared", "session_id": "%s"}', st.session_state.get("session_id", "unknown"))
                 st.rerun()
         else:
             st.button("Clear Chat History", key="clear_chat_button", disabled=True)
@@ -806,6 +843,7 @@ def enhance_sidebar():
                 submitted = st.form_submit_button("Pay Now")
                 
                 if submitted and phone:
+                    session_id = st.session_state.get("session_id", "unknown")
                     if validate_phone_number(phone):
                         amount = st.session_state.document_price
                         account_ref = "Smart Clause"
@@ -815,16 +853,23 @@ def enhance_sidebar():
                             if 'ResponseCode' in response and response['ResponseCode'] == '0':
                                 update_payment_status(response['CheckoutRequestID'], amount)
                                 st.success("✓ Check your phone for payment prompt")
+                                logger.info('{"event": "payment_initiated", "session_id": "%s", "checkout_request_id": "%s", "amount": %d}', 
+                                            session_id, response['CheckoutRequestID'], amount)
                             else:
-                                st.error("✗ Payment failed: " + response.get('errorMessage', 'Unknown error'))
+                                st.error("✗ Payment initiation failed. Please try again. If this issue persists, please report it using the Feedback tab in the Help Guide.")
+                                logger.error('{"event": "payment_initiation_failed", "session_id": "%s", "error": "%s"}', 
+                                             session_id, response.get('errorMessage', 'Unknown error'))
                         except Exception as e:
-                            st.error(f"✗ Error: {str(e)}")
+                            st.error("✗ An error occurred during payment. Please try again later. If this issue persists, please report it using the Feedback tab in the Help Guide.")
+                            logger.error('{"event": "payment_initiation_error", "session_id": "%s", "error": "%s"}', session_id, str(e), exc_info=True)
+                    else:
+                        st.error("✗ Invalid phone number format. Use 254XXXXXXXXX. If this issue persists, please report it using the Feedback tab in the Help Guide.")
             st.markdown('</div>', unsafe_allow_html=True)
 
 def format_document_html(content: str) -> str:
     """Convert document content to formatted HTML for display in the web interface with theme awareness"""
-    logger.info(f"Full document content length: {len(content)}")
-    logger.info(f"First 200 characters: {content[:200]}")
+    session_id = st.session_state.get("session_id", "unknown")
+    logger.info('{"event": "format_document_html", "session_id": "%s", "content_length": %d}', session_id, len(content))
 
     doc_type = identify_document_type(content)
     
@@ -981,6 +1026,7 @@ def show_main_content():
         show_download_buttons()
 
     if prompt := st.chat_input("Describe your legal document needs, e.g., 'Draft a contract for...'"):
+        session_id = st.session_state.get("session_id", "unknown")
         if st.session_state.show_welcome:
             st.session_state.show_welcome = False
             
@@ -1000,14 +1046,19 @@ def show_main_content():
                         sanitized_prompt = sanitize_text(prompt)
                         preview, success = generate_document(st.session_state.generator, sanitized_prompt)
                     else:
-                        preview = "Invalid prompt. Please enter a description between 5 and 1000 characters."
+                        preview = "Invalid prompt. Please enter a description between 5 and 1000 characters. If this issue persists, please report it using the Feedback tab in the Help Guide."
                         success = False
+                        logger.warning('{"event": "invalid_prompt_input", "session_id": "%s", "prompt_length": %d}', 
+                                       session_id, len(prompt))
                 
                 if success:
                     formatted_html = format_document_html(preview)
                     response_placeholder.markdown(formatted_html, unsafe_allow_html=True)
                 else:
                     response_placeholder.markdown(preview)
+            except Exception as e:
+                logger.error('{"event": "main_content_error", "session_id": "%s", "error": "%s"}', session_id, str(e), exc_info=True)
+                response_placeholder.markdown("An unexpected error occurred. Please try again later. If this issue persists, please report it using the Feedback tab in the Help Guide.")
             finally:
                 st.session_state.generation_in_progress = False
 
