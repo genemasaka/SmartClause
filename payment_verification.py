@@ -1,13 +1,18 @@
-# payment_verification.py
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 import streamlit as st
+import logging
+import os
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 @dataclass
 class PaymentStatus:
-    document_id: str  # Added to track which document the payment is for
+    document_id: str  # Tracks which document the payment is for
     checkout_request_id: str
     amount: float
     timestamp: datetime
@@ -33,10 +38,12 @@ class PaymentVerification:
                 
                 # Check if payment was successful
                 if response.get('ResultCode') == '0':
+                    logger.info(f"Payment verified successfully for document {document_id}")
                     return True
                     
                 # Check for specific failure codes
                 elif response.get('ResultCode') in ['1032', '1037']:  # Transaction canceled/timeout
+                    logger.info(f"Payment failed with ResultCode {response.get('ResultCode')} for document {document_id}")
                     return False
                     
                 # Wait before retrying
@@ -44,9 +51,10 @@ class PaymentVerification:
                 attempts += 1
                 
             except Exception as e:
-                print(f"Error verifying payment: {str(e)}")
+                logger.error(f"Error verifying payment for document {document_id}: {str(e)}")
                 attempts += 1
                 
+        logger.info(f"Max attempts reached for payment verification of document {document_id}")
         return False
 
 def init_payment_state():
@@ -59,8 +67,10 @@ def init_payment_state():
         st.session_state.current_document_id = None
 
 def generate_document_id():
-    """Generate a unique ID for a document"""
-    return f"doc_{datetime.now().strftime('%Y%m%d%H%M%S')}_{hash(str(datetime.now()))}"
+    """Generate a unique and secure ID for a document"""
+    timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+    random_component = os.urandom(8).hex()  # Secure random 16-character hex string
+    return f"doc_{timestamp}_{random_component}"
 
 def reset_payment_state():
     """Reset payment state for new document"""
@@ -104,13 +114,18 @@ def handle_download_request(payment_verifier: PaymentVerification) -> bool:
     
     # Verify payment
     with st.spinner("Verifying payment..."):
-        if payment_verifier.verify_payment(
-            st.session_state.payment_status.checkout_request_id,
-            st.session_state.current_document_id
-        ):
-            st.session_state.payment_verified = True
-            st.success("Payment verified successfully!")
-            return True
-        else:
-            st.error("Payment verification failed. Please ensure you have completed the payment")
+        try:
+            if payment_verifier.verify_payment(
+                st.session_state.payment_status.checkout_request_id,
+                st.session_state.current_document_id
+            ):
+                st.session_state.payment_verified = True
+                st.success("Payment verified successfully!")
+                return True
+            else:
+                st.error("Payment verification failed. Please ensure you have completed the payment")
+                return False
+        except Exception as e:
+            logger.error(f"Error during payment verification for document {st.session_state.current_document_id}: {str(e)}")
+            st.error("An error occurred during payment verification. Please try again later.")
             return False

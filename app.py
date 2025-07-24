@@ -17,6 +17,8 @@ from fpdf import FPDF
 import io
 import re
 import time
+import html
+import bleach
 from payment_verification import PaymentVerification, init_payment_state, update_payment_status, handle_download_request, reset_payment_state
 
 # Configure logging
@@ -61,6 +63,87 @@ def init_session_state():
         st.warning("Some fonts are missing. Documents may not display correctly.")
     init_payment_state()
 
+def validate_input(input_value, input_type):
+    """
+    Enhanced validation with additional security checks
+    """
+    if input_type == 'phone':
+        # Existing phone validation
+        return input_value.startswith("254") and len(input_value) == 12 and input_value.isdigit()
+    
+    elif input_type == 'email':
+        # Enhanced email validation with additional security checks
+        if not input_value:
+            return False
+        
+        # Check for injection attempts
+        dangerous_chars = ['\n', '\r', '\t', '<', '>', '"', "'"]
+        if any(char in input_value for char in dangerous_chars):
+            logger.warning("Potentially malicious email input blocked")
+            return False
+        
+        # Basic email regex
+        import re
+        pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
+        return bool(re.match(pattern, input_value))
+    
+    elif input_type == 'prompt':
+        if not input_value or len(input_value) > 1000 or len(input_value.strip()) < 5:
+            return False
+        
+        # Additional check for excessive special characters (potential obfuscation)
+        special_char_ratio = sum(1 for c in input_value if not c.isalnum() and not c.isspace()) / len(input_value)
+        if special_char_ratio > 0.3:  # More than 30% special characters
+            logger.warning("Input with excessive special characters blocked")
+            return False
+        
+        return True
+    
+    elif input_type == 'feedback':
+        if len(input_value) > 2000:
+            return False
+        return True
+    
+    return False
+
+def sanitize_text(text):
+    """
+    Enhanced sanitize text input to remove potential malicious content
+    Fixes issues with JavaScript URLs and whitespace handling
+    """
+    if not text:
+        return text
+    
+    # First, remove javascript: URLs and other dangerous protocols
+    dangerous_protocols = [
+        r'javascript\s*:',
+        r'vbscript\s*:',
+        r'data\s*:',
+        r'about\s*:',
+    ]
+    
+    cleaned_text = text
+    for protocol in dangerous_protocols:
+        cleaned_text = re.sub(protocol, '', cleaned_text, flags=re.IGNORECASE)
+    
+    # Remove HTML tags using bleach
+    cleaned_text = bleach.clean(cleaned_text, tags=[], strip=True)
+    
+    # Clean up extra whitespace that might be left from nested tags
+    cleaned_text = re.sub(r'\s+', ' ', cleaned_text.strip())
+    
+    # Additional safety: Remove any remaining event handlers
+    dangerous_attributes = [
+        r'on\w+\s*=',  # onclick, onload, onerror, etc.
+        r'href\s*=\s*["\']?\s*javascript:',
+        r'src\s*=\s*["\']?\s*javascript:',
+    ]
+    
+    for attr in dangerous_attributes:
+        cleaned_text = re.sub(attr, '', cleaned_text, flags=re.IGNORECASE)
+    
+    return cleaned_text
+
 class UnicodeAwarePDF(FPDF):
     def __init__(self):
         super().__init__()
@@ -69,7 +152,7 @@ class UnicodeAwarePDF(FPDF):
         self.set_font('DejaVu', size=11)
         self.set_auto_page_break(auto=True, margin=15)
     
-    def multi_cell(self, w, h, txt, border=0, align='L', fill=False):
+def multi_cell(self, w, h, txt, border=0, align='L', fill=False):
         if w == 0:
             w = self.w - self.l_margin - self.r_margin
         wmax = (w - 2 * self.c_margin) * 1000 / self.font_size
@@ -123,7 +206,7 @@ class LegalDocumentPDF(FPDF):
         self.ln(5)
 
 def clean_markdown(text: str) -> tuple[str, bool]:
-    """Remove markdown symbols except square brackets and return the clean text and whether it was bold"""
+    """Remove markdown symbols except square brackets, escape HTML, and return the clean text and whether it was bold"""
     is_bold = False
     cleaned_text = text
     
@@ -142,7 +225,8 @@ def clean_markdown(text: str) -> tuple[str, bool]:
     for incorrect, correct in special_phrases.items():
         cleaned_text = cleaned_text.replace(incorrect, correct)
     
-    return cleaned_text.strip(), is_bold
+    escaped_text = html.escape(cleaned_text.strip())
+    return escaped_text, is_bold
 
 def identify_document_type(content: str) -> str:
     """Identify if the document is an affidavit or contract"""
@@ -660,7 +744,7 @@ def show_help_section():
             A: Currently, we accept M-PESA payments only.
                         
             📱 Need Help?
-                Email: support@smartclause.co.ke
+                Email: smartclause6@gmail.com
                 Call: +254 XXX XXX XXX
             """)
             
@@ -673,11 +757,17 @@ def show_help_section():
                 
                 if submitted:
                     if feedback:
-                        try:
-                            send_feedback_email(feedback, user_email)
-                            st.success("Thank you for your feedback!")
-                        except Exception as e:
-                            st.error(f"Failed to send feedback: {str(e)}")
+                        if user_email and not validate_input(user_email, 'email'):
+                            st.error("Invalid email format.")
+                        elif not validate_input(feedback, 'feedback'):
+                            st.error("Feedback must be less than 2000 characters.")
+                        else:
+                            sanitized_feedback = sanitize_text(feedback)
+                            try:
+                                send_feedback_email(sanitized_feedback, user_email)
+                                st.success("Thank you for your feedback!")
+                            except Exception as e:
+                                st.error(f"Failed to send feedback: {str(e)}")
                     else:
                         st.warning("Please enter your feedback before submitting.")
 
@@ -906,7 +996,12 @@ def show_main_content():
             
             try:
                 with st.spinner("Generating your document..."):
-                    preview, success = generate_document(st.session_state.generator, prompt)
+                    if validate_input(prompt, 'prompt'):
+                        sanitized_prompt = sanitize_text(prompt)
+                        preview, success = generate_document(st.session_state.generator, sanitized_prompt)
+                    else:
+                        preview = "Invalid prompt. Please enter a description between 5 and 1000 characters."
+                        success = False
                 
                 if success:
                     formatted_html = format_document_html(preview)
@@ -927,6 +1022,15 @@ def show_main_content():
                 st.rerun()
 
 def main():
+    # --- Theme change detection for dynamic logo switching ---
+    current_theme = st.get_option("theme.base")
+    if "_last_theme" not in st.session_state:
+        st.session_state["_last_theme"] = current_theme
+    elif st.session_state["_last_theme"] != current_theme:
+        st.session_state["_last_theme"] = current_theme
+        st.experimental_rerun()
+    # --- End theme change detection ---
+
     st.set_page_config(
         page_title="SmartClause",
         page_icon="assets/smartclause_badge.png",
@@ -950,7 +1054,7 @@ def main():
         border-radius: 10px;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         width: 100%;
-        margin-bottom: 20px;
+        margin-bottom:  20px;
     }
     
     .stMarkdown, 
