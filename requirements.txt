@@ -1,7 +1,19 @@
-streamlit==1.36.0
+# Core web app
+streamlit>=1.36.0
+
+# OpenAI API
 openai>=1.40.0,<2.0
+
+# Environment variables
 python-dotenv>=1.0.0
+
+# Document generation
 python-docx==1.0.1
 fpdf==1.7.2
-requests>=2.31.0
 bleach==6.1.0
+
+# Networking & APIs
+requests>=2.31.0
+
+# Security & Encryption
+cryptography>=42.0.0
