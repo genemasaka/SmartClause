@@ -1,7 +1,7 @@
 import re
 import logging
 from pathlib import Path
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, Any
 from dataclasses import dataclass
 import json
 from functools import lru_cache
@@ -9,9 +9,16 @@ import os
 import time
 import queue
 import threading
-from google.api_core.exceptions import ResourceExhausted
-import google.generativeai as genai
 from dotenv import load_dotenv
+
+# NEW: OpenAI SDK
+from openai import OpenAI
+try:
+    # These may not exist in all SDK versions; fallback to Exception if not present
+    from openai import RateLimitError  # type: ignore
+except Exception:  # pragma: no cover
+    class RateLimitError(Exception):  # type: ignore
+        pass
 
 # Set up logging with a more detailed format
 logging.basicConfig(
@@ -53,9 +60,14 @@ class TemplateManager:
             self._templates = {}
 
 class RequestQueue:
-    def __init__(self):
+    """
+    Background queue. NOTE: Only model-related bits were touched to work with OpenAI.
+    """
+    def __init__(self, client: Optional[OpenAI] = None, model_name: Optional[str] = None):
         self.queue = queue.Queue()
         self.results = {}
+        self.client = client
+        self.model_name = model_name
         self.thread = threading.Thread(target=self._process_queue, daemon=True)
         self.thread.start()
 
@@ -65,7 +77,12 @@ class RequestQueue:
             try:
                 # Process with delay between requests
                 time.sleep(2)  # Minimum 2 second delay between requests
-                response = self.model.generate_content(prompt)
+                if not self.client or not self.model_name:
+                    raise RuntimeError("OpenAI client/model not configured for RequestQueue")
+                response = self.client.responses.create(
+                    model=self.model_name,
+                    input=prompt
+                )
                 self.results[request_id] = response
             except Exception as e:
                 self.results[request_id] = e
@@ -89,12 +106,18 @@ DOCUMENT_TYPES = {
     "other": ["letter", "notice", "memo", "document"]
 }
 
+@dataclass
+class OpenAIModel:
+    """Light adapter to carry OpenAI client + model name"""
+    client: OpenAI
+    model_name: str
+
 class DocumentGenerator:
     """Handles document generation logic with enhanced rate limit handling and natural language detection"""
     
-    def __init__(self, template_manager, model: genai.GenerativeModel):
+    def __init__(self, template_manager, model: OpenAIModel):
         self.template_manager = template_manager
-        self.model = model
+        self.model = model  # OpenAIModel(client=<OpenAI>, model_name=str)
         self.logger = logging.getLogger(__name__)
         self.rate_limit_config = {
             'max_retries': 3,
@@ -141,20 +164,20 @@ class DocumentGenerator:
         )
         return delay
 
-    def _generate_ai_content(self, filled_template: str, query: str) -> Optional[genai.types.GenerateContentResponse]:
-        """Generate content using AI model with enhanced retry logic"""
+    @lru_cache(maxsize=128)
+    def _generate_ai_content(self, filled_template: str, query: str) -> Any:
+        """
+        Generate content using OpenAI Responses API with retry logic and caching.
+        """
         prompt = self._create_prompt(filled_template, query)
         
         for attempt in range(self.rate_limit_config['max_retries']):
             try:
-                response = self.model.generate_content(
-                    prompt,
-                    generation_config={
-                        'temperature': 0.7,
-                        'top_p': 0.8,
-                        'top_k': 40,
-                        'max_output_tokens': 2048,
-                    }
+                response = self.model.client.responses.create(
+                    model=self.model.model_name,
+                    input=prompt
+                    # NOTE: The Responses API can accept additional parameters,
+                    # but we pass minimal ones to avoid changing non-model logic.
                 )
                 
                 if self._validate_response(response):
@@ -162,23 +185,17 @@ class DocumentGenerator:
                     
                 self.logger.warning(f"Invalid response format on attempt {attempt + 1}")
                 
-            except ResourceExhausted as e:
+            except RateLimitError as e:
                 delay = self._exponential_backoff(attempt)
                 self.logger.warning(
                     f"Rate limit hit on attempt {attempt + 1}. "
                     f"Retrying in {delay} seconds... Error: {str(e)}"
                 )
-                
                 if attempt < self.rate_limit_config['max_retries'] - 1:
                     time.sleep(delay)
                     continue
-                    
-                self.logger.error(
-                    "Rate limit exceeded after all retries. "
-                    "Consider implementing rate limiting or request queuing."
-                )
+                self.logger.error("Rate limit exceeded after all retries.")
                 raise
-                
             except Exception as e:
                 self.logger.error(f"Unexpected error during generation: {str(e)}")
                 if attempt == self.rate_limit_config['max_retries'] - 1:
@@ -186,17 +203,11 @@ class DocumentGenerator:
                     
         raise ValueError("Failed to generate valid content after multiple attempts")
 
-    def _validate_response(self, response) -> bool:
-        """Validate that the response has the expected structure"""
+    def _validate_response(self, response: Any) -> bool:
+        """Validate that the response has the expected structure for OpenAI Responses API"""
         try:
-            return (
-                hasattr(response, 'candidates') and
-                response.candidates and
-                hasattr(response.candidates[0], 'content') and
-                hasattr(response.candidates[0].content, 'parts') and
-                response.candidates[0].content.parts and
-                hasattr(response.candidates[0].content.parts[0], 'text')
-            )
+            # The Python SDK exposes a convenience property: output_text
+            return hasattr(response, "output_text") and isinstance(response.output_text, str) and len(response.output_text.strip()) > 0
         except Exception as e:
             self.logger.error(f"Response validation failed: {e}")
             return False
@@ -216,22 +227,13 @@ class DocumentGenerator:
             raise
 
     @staticmethod
-    def _extract_response_text(response: genai.types.GenerateContentResponse) -> Optional[str]:
-        """Extract text from AI response with improved error handling"""
+    def _extract_response_text(response: Any) -> Optional[str]:
+        """Extract text from OpenAI Responses API result"""
         try:
-            if not response.candidates:
-                return None
-                
-            candidate = response.candidates[0]
-            if not hasattr(candidate, 'content') or not candidate.content.parts:
-                return None
-                
-            text = candidate.content.parts[0].text
+            text = getattr(response, "output_text", None)
             if not text:
                 return None
-                
             return text
-            
         except Exception as e:
             logging.error(f"Error extracting response text: {e}")
             return None
@@ -333,8 +335,8 @@ class DocumentGenerator:
             self.logger.error(f"Document generation failed: {e}", exc_info=True)
             return None
 
-def setup_environment() -> Tuple[TemplateManager, genai.GenerativeModel]:
-    """Setup environment and dependencies"""
+def setup_environment() -> Tuple[TemplateManager, OpenAIModel]:
+    """Setup environment and dependencies (OpenAI version)"""
     # Load environment variables
     env_path = Path("./.env")
     if env_path.exists():
@@ -342,19 +344,19 @@ def setup_environment() -> Tuple[TemplateManager, genai.GenerativeModel]:
     else:
         logger.warning(".env file not found, attempting to use existing environment variables")
 
-    api_key = os.getenv("GEMINI_API_KEY")
+    api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        raise EnvironmentError("GEMINI_API_KEY not found in environment variables")
+        raise EnvironmentError("OPENAI_API_KEY not found in environment variables")
         
-    # Configure Gemini API
-    genai.configure(api_key=api_key)
+    # Initialize OpenAI client
+    client = OpenAI(api_key=api_key)
     
-    # Initialize template manager and model
+    # Initialize template manager and set model (pick a strong default)
     template_path = Path("./legal_templates.json")
     template_manager = TemplateManager(template_path)
-    model = genai.GenerativeModel("gemini-1.5-pro")
+    model = OpenAIModel(client=client, model_name=os.getenv("OPENAI_MODEL", "gpt-4o"))
     
-    logger.info("Environment setup completed successfully")
+    logger.info("Environment setup completed successfully (OpenAI)")
     return template_manager, model
 
 def main():
