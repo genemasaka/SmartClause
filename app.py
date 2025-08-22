@@ -22,6 +22,7 @@ import time
 import html
 import bleach
 from payment_verification import PaymentVerification, init_payment_state, update_payment_status, handle_download_request, reset_payment_state
+import base64
 
 # Configure structured logging
 logging.basicConfig(
@@ -522,7 +523,7 @@ def show_download_buttons():
         
         try:
             if not st.session_state.payment_verified:
-                st.warning("⚠️ Payment required before download")
+                st.warning("Please open the side bar and complete payment to download file. If this issue persists, please report it using the Feedback tab in the Help Guide")
             else:
                 st.success("✅ Payment verified")
             
@@ -996,14 +997,8 @@ def format_document_html(content: str) -> str:
     return html
 
 def show_main_content():
-    is_dark_mode = True if st.get_option("theme.base") == "dark" else False
-    if is_dark_mode:
-        logo_path = "assets/smartclause_logo_light.png"
-    else:
-        logo_path = "assets/smartclause_logo_dark.png"
-
-    st.image(logo_path, width=300)
-    st.caption("Generate professional legal documents compliant with Kenyan law")
+    
+    st.markdown('<p style="font-size: 16px; color: #888888;">Generate professional legal documents compliant with Kenyan law</p>', unsafe_allow_html=True)
 
     if st.session_state.show_welcome:
         show_welcome_modal()
@@ -1085,10 +1080,22 @@ def main():
     st.set_page_config(
         page_title="SmartClause",
         page_icon="assets/smartclause_badge.png",
-        layout="wide"
+        layout="centered"
     )
     
     init_session_state()
+
+    try:
+        is_dark_mode = st.get_option("theme.base") == "dark"
+    except Exception:
+        is_dark_mode = False
+
+    if is_dark_mode:
+        logo_path = "assets/smartclause_logo_light.png"
+    else:
+        logo_path = "assets/smartclause_logo_dark.png"
+
+    st.logo(logo_path, size="medium")
     
     st.markdown("""
     <style>
@@ -1185,6 +1192,45 @@ def main():
         overflow: visible !important;
         display: block;
         width: 100%;
+    }
+
+    .stImage > img {
+        max-width: 300px;
+        height: auto;
+        margin: 0 auto;
+        display: block;
+    }
+
+    @media (max-width: 768px) {
+        .legal-document {
+            padding: 20px;
+            font-size: 14px;
+        }
+        .doc-paragraph {
+            font-size: 14px;
+        }
+        .title-container {
+            font-size: 24px;
+        }
+        .stImage > img {
+            max-width: 100%;
+        }
+        .payment-card {
+            padding: 15px;
+        }
+    }
+
+    @media (max-width: 500px) {
+        .legal-document {
+            padding: 10px;
+            font-size: 12px;
+        }
+        .doc-paragraph {
+            font-size: 12px;
+        }
+        .stImage > img {
+            max-width: 100%;
+        }
     }
     </style>
     """, unsafe_allow_html=True)

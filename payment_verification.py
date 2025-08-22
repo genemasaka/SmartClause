@@ -42,15 +42,18 @@ class PaymentVerification:
         while attempts < max_attempts:
             try:
                 response = self.mpesa_handler.query_stk_push(checkout_request_id)
+                # Normalise the result code to a string for robust comparison. Some APIs
+                # return integers while others return strings.
+                result_code = str(response.get('ResultCode')) if response.get('ResultCode') is not None else ''
                 
-                if response.get('ResultCode') == '0':
+                if result_code == '0':
                     logger.info('{"event": "payment_verified", "document_id": "%s", "checkout_request_id": "%s"}', 
                                 document_id, checkout_request_id)
                     return True
                     
-                elif response.get('ResultCode') in ['1032', '1037']:
+                elif result_code in ['1032', '1037']:
                     logger.info('{"event": "payment_failed", "document_id": "%s", "checkout_request_id": "%s", "result_code": "%s"}', 
-                                document_id, checkout_request_id, response.get('ResultCode'))
+                                document_id, checkout_request_id, result_code)
                     return False
                     
                 time.sleep(delay)
