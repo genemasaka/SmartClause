@@ -523,7 +523,7 @@ def show_download_buttons():
         
         try:
             if not st.session_state.payment_verified:
-                st.warning("Please open the side bar and complete payment to download file. If this issue persists, please report it using the Feedback tab in the Help Guide")
+                st.warning("Please open the side bar and complete payment to download file.")
             else:
                 st.success("✅ Payment verified")
             
