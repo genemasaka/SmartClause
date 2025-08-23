@@ -162,44 +162,44 @@ class DocumentGenerator:
 
     @lru_cache(maxsize=128)
     def _generate_ai_content(self, filled_template: str, query: str) -> Any:
-    """
-    Generate content using OpenAI Responses API with retry logic and caching.
-    """
-    prompt = self._create_prompt(filled_template, query)
-
-    # Allow env override; sensible defaults for long legal prose
-    max_tokens = int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "7000"))
-    temperature = float(os.getenv("OPENAI_TEMPERATURE", "0.25"))
-    top_p = float(os.getenv("OPENAI_TOP_P", "0.9"))
-
-    for attempt in range(self.rate_limit_config['max_retries']):
-        try:
-            response = self.model.client.responses.create(
-                model=self.model.model_name,
-                input=prompt,
-                max_output_tokens=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-                presence_penalty=0.0,
-                frequency_penalty=0.0,
-            )
-            if self._validate_response(response):
-                return response
-            self.logger.warning(f"Invalid response format on attempt {attempt + 1}")
-        except RateLimitError as e:
-            delay = self._exponential_backoff(attempt)
-            self.logger.warning(
-                f"Rate limit hit on attempt {attempt + 1}. Retrying in {delay} seconds... Error: {str(e)}"
-            )
-            if attempt < self.rate_limit_config['max_retries'] - 1:
-                time.sleep(delay)
-                continue
-            self.logger.error("Rate limit exceeded after all retries.")
-            raise
-        except Exception as e:
-            self.logger.error(f"Unexpected error during generation: {str(e)}")
-            if attempt == self.rate_limit_config['max_retries'] - 1:
+        """
+        Generate content using OpenAI Responses API with retry logic and caching.
+        """
+        prompt = self._create_prompt(filled_template, query)
+    
+        # Allow env override; sensible defaults for long legal prose
+        max_tokens = int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "7000"))
+        temperature = float(os.getenv("OPENAI_TEMPERATURE", "0.25"))
+        top_p = float(os.getenv("OPENAI_TOP_P", "0.9"))
+    
+        for attempt in range(self.rate_limit_config['max_retries']):
+            try:
+                response = self.model.client.responses.create(
+                    model=self.model.model_name,
+                    input=prompt,
+                    max_output_tokens=max_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    presence_penalty=0.0,
+                    frequency_penalty=0.0,
+                )
+                if self._validate_response(response):
+                    return response
+                self.logger.warning(f"Invalid response format on attempt {attempt + 1}")
+            except RateLimitError as e:
+                delay = self._exponential_backoff(attempt)
+                self.logger.warning(
+                    f"Rate limit hit on attempt {attempt + 1}. Retrying in {delay} seconds... Error: {str(e)}"
+                )
+                if attempt < self.rate_limit_config['max_retries'] - 1:
+                    time.sleep(delay)
+                    continue
+                self.logger.error("Rate limit exceeded after all retries.")
                 raise
+            except Exception as e:
+                self.logger.error(f"Unexpected error during generation: {str(e)}")
+                if attempt == self.rate_limit_config['max_retries'] - 1:
+                    raise
 
     raise ValueError("Failed to generate valid content after multiple attempts")
 
