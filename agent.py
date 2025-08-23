@@ -11,13 +11,12 @@ import queue
 import threading
 from dotenv import load_dotenv
 
-# NEW: OpenAI SDK
+# OpenAI SDK
 from openai import OpenAI
 try:
-    # These may not exist in all SDK versions; fallback to Exception if not present
-    from openai import RateLimitError  # type: ignore
-except Exception:  # pragma: no cover
-    class RateLimitError(Exception):  # type: ignore
+    from openai import RateLimitError
+except ImportError:
+    class RateLimitError(Exception):
         pass
 
 # Set up logging with a more detailed format
@@ -61,7 +60,7 @@ class TemplateManager:
 
 class RequestQueue:
     """
-    Background queue. NOTE: Only model-related bits were touched to work with OpenAI.
+    Background queue for processing requests
     """
     def __init__(self, client: Optional[OpenAI] = None, model_name: Optional[str] = None):
         self.queue = queue.Queue()
@@ -73,15 +72,18 @@ class RequestQueue:
 
     def _process_queue(self):
         while True:
-            request_id, prompt = self.queue.get()
+            request_id, messages = self.queue.get()
             try:
                 # Process with delay between requests
                 time.sleep(2)  # Minimum 2 second delay between requests
                 if not self.client or not self.model_name:
                     raise RuntimeError("OpenAI client/model not configured for RequestQueue")
-                response = self.client.responses.create(
+                
+                response = self.client.chat.completions.create(
                     model=self.model_name,
-                    input=prompt
+                    messages=messages,
+                    max_tokens=7000,
+                    temperature=0.25
                 )
                 self.results[request_id] = response
             except Exception as e:
@@ -89,10 +91,10 @@ class RequestQueue:
             finally:
                 self.queue.task_done()
 
-    def add_request(self, request_id: str, prompt: str):
-        self.queue.put((request_id, prompt))
+    def add_request(self, request_id: str, messages: list):
+        self.queue.put((request_id, messages))
 
-    def get_result(self, request_id: str) -> Optional[str]:
+    def get_result(self, request_id: str) -> Optional[Any]:
         return self.results.get(request_id)
     
 # Consolidated document type detection: All affidavit variants fall under "affidavit"
@@ -160,33 +162,38 @@ class DocumentGenerator:
         )
         return delay
 
-    @lru_cache(maxsize=128)
     def _generate_ai_content(self, filled_template: str, query: str) -> Any:
         """
-        Generate content using OpenAI Responses API with retry logic and caching.
+        Generate content using OpenAI Chat Completions API with retry logic.
         """
-        prompt = self._create_prompt(filled_template, query)
-    
+        messages = [
+            {
+                "role": "user",
+                "content": self._create_prompt(filled_template, query)
+            }
+        ]
+
         # Allow env override; sensible defaults for long legal prose
-        max_tokens = int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "7000"))
+        max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "4000"))
         temperature = float(os.getenv("OPENAI_TEMPERATURE", "0.25"))
         top_p = float(os.getenv("OPENAI_TOP_P", "0.9"))
-    
+
+        last_err: Optional[Exception] = None
+
         for attempt in range(self.rate_limit_config['max_retries']):
             try:
-                response = self.model.client.responses.create(
+                response = self.model.client.chat.completions.create(
                     model=self.model.model_name,
-                    input=prompt,
-                    max_output_tokens=max_tokens,
+                    messages=messages,
+                    max_tokens=max_tokens,
                     temperature=temperature,
                     top_p=top_p,
-                    presence_penalty=0.0,
-                    frequency_penalty=0.0,
                 )
                 if self._validate_response(response):
                     return response
                 self.logger.warning(f"Invalid response format on attempt {attempt + 1}")
             except RateLimitError as e:
+                last_err = e
                 delay = self._exponential_backoff(attempt)
                 self.logger.warning(
                     f"Rate limit hit on attempt {attempt + 1}. Retrying in {delay} seconds... Error: {str(e)}"
@@ -195,20 +202,30 @@ class DocumentGenerator:
                     time.sleep(delay)
                     continue
                 self.logger.error("Rate limit exceeded after all retries.")
-                raise
             except Exception as e:
+                last_err = e
                 self.logger.error(f"Unexpected error during generation: {str(e)}")
-                if attempt == self.rate_limit_config['max_retries'] - 1:
-                    raise
+                if attempt < self.rate_limit_config['max_retries'] - 1:
+                    delay = self._exponential_backoff(attempt)
+                    time.sleep(delay)
+                    continue
 
-    raise ValueError("Failed to generate valid content after multiple attempts")
-
+        # If we got here, all attempts failed
+        if last_err:
+            raise ValueError("Failed to generate valid content after multiple attempts") from last_err
+        raise ValueError("Failed to generate valid content after multiple attempts")
 
     def _validate_response(self, response: Any) -> bool:
-        """Validate that the response has the expected structure for OpenAI Responses API"""
+        """Validate that the response has the expected structure for OpenAI Chat Completions API"""
         try:
-            # The Python SDK exposes a convenience property: output_text
-            return hasattr(response, "output_text") and isinstance(response.output_text, str) and len(response.output_text.strip()) > 0
+            return (
+                hasattr(response, "choices") and 
+                len(response.choices) > 0 and
+                hasattr(response.choices[0], "message") and
+                hasattr(response.choices[0].message, "content") and
+                response.choices[0].message.content and
+                len(response.choices[0].message.content.strip()) > 0
+            )
         except Exception as e:
             self.logger.error(f"Response validation failed: {e}")
             return False
@@ -229,12 +246,11 @@ class DocumentGenerator:
 
     @staticmethod
     def _extract_response_text(response: Any) -> Optional[str]:
-        """Extract text from OpenAI Responses API result"""
+        """Extract text from OpenAI Chat Completions API result"""
         try:
-            text = getattr(response, "output_text", None)
-            if not text:
-                return None
-            return text
+            if hasattr(response, "choices") and len(response.choices) > 0:
+                return response.choices[0].message.content
+            return None
         except Exception as e:
             logging.error(f"Error extracting response text: {e}")
             return None
@@ -261,7 +277,7 @@ class DocumentGenerator:
           - **Minimum 120–200 words per clause** (more if needed to be complete).
           - Avoid contradictions and cross-reference other clauses by number where apt.
           - Concrete obligations, time frames, dependencies, carve-outs, process steps, and local-law compliance notes.
-          - No placeholders like “as may be agreed” unless paired with a mechanism (e.g., “agreement via written notice under Clause 20 within 5 Business Days”).
+          - No placeholders like "as may be agreed" unless paired with a mechanism (e.g., "agreement via written notice under Clause 20 within 5 Business Days").
           - No summarised/telegraphic lines; write full sentences.
           - Use Kenyan legal practice (Constitution of Kenya 2010; Law of Contract Act (Cap. 23); Companies Act 2015; Data Protection Act 2019; etc.) when pertinent.
           - **Do not shorten for brevity.** Err on the side of completeness.
@@ -378,7 +394,6 @@ class DocumentGenerator:
             return None
 
 def setup_environment() -> Tuple[TemplateManager, OpenAIModel]:
-
     """Setup environment and dependencies (OpenAI version)"""
     # Load environment variables
     env_path = Path("./.env")
@@ -397,7 +412,7 @@ def setup_environment() -> Tuple[TemplateManager, OpenAIModel]:
     # Initialize template manager and set model (pick a strong default)
     template_path = Path("./legal_templates.json")
     template_manager = TemplateManager(template_path)
-    model = OpenAIModel(client=client, model_name=os.getenv("OPENAI_MODEL", "gpt-4o"))
+    model = OpenAIModel(client=client, model_name=os.getenv("OPENAI_MODEL", "gpt-4"))
     
     logger.info("Environment setup completed successfully (OpenAI)")
     return template_manager, model
