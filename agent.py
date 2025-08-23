@@ -177,7 +177,6 @@ class DocumentGenerator:
             response = self.model.client.responses.create(
                 model=self.model.model_name,
                 input=prompt,
-                # 👇 key parameters for long, steady, on-spec prose
                 max_output_tokens=max_tokens,
                 temperature=temperature,
                 top_p=top_p,
@@ -254,7 +253,18 @@ class DocumentGenerator:
         - Use dynamic templates with contextual placeholders for user-specific details.
         - Validate outputs against requirements, preserving jurisdictional nuances.
         - Support varied complexities and formats while minimizing unnecessary jargon.
-        - For affidavits, dynamically customize the generic template based on the query's specific type (e.g., name change, NTSA force transfer). Incorporate type-specific headings, clauses, and language to ensure consistency with Kenyan standards under the Oaths and Statutory Declarations Act (Cap. 15). Do not use separate templates; adapt the provided one.
+        - For affidavits, dynamically customize the generic template based on the query's specific type (e.g., name change, NTSA force transfer). 
+          Incorporate type-specific headings, clauses, and language to ensure consistency with Kenyan standards under the Oaths and Statutory Declarations Act (Cap. 15).
+          Do not use separate templates; adapt the provided one.
+        - For contracts, write **substantive content** with:
+          - **2–4 paragraphs** *or* **(a)–(h) sub-clauses** (and sub-points i., ii., iii. where helpful).
+          - **Minimum 120–200 words per clause** (more if needed to be complete).
+          - Avoid contradictions and cross-reference other clauses by number where apt.
+          - Concrete obligations, time frames, dependencies, carve-outs, process steps, and local-law compliance notes.
+          - No placeholders like “as may be agreed” unless paired with a mechanism (e.g., “agreement via written notice under Clause 20 within 5 Business Days”).
+          - No summarised/telegraphic lines; write full sentences.
+          - Use Kenyan legal practice (Constitution of Kenya 2010; Law of Contract Act (Cap. 23); Companies Act 2015; Data Protection Act 2019; etc.) when pertinent.
+          - **Do not shorten for brevity.** Err on the side of completeness.
 
         Compliance Focus:
         Reference and align with core legislation, including:
