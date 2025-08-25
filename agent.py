@@ -352,10 +352,11 @@ class DocumentGenerator:
 
         Important Instructions:
         1. Adhere exactly to template structure, but adapt content for query specifics.
-        2. Output only the document content and disclaimer.
-        3. Avoid any additional explanations, commentary, or sections.
-        4. End immediately after the disclaimer.
-        5. Always append this disclaimer: 
+        2. Ensure accurate spelling and grammar throughout the document.
+        3. Output only the document content and disclaimer.
+        4. Avoid any additional explanations, commentary, or sections.
+        5. End immediately after the disclaimer.
+        6. Always append this disclaimer:
 
         **IMPORTANT DISCLAIMER:** This document is a template and may not be suitable for all situations. You should consult with a qualified legal professional in Kenya to ensure that this document is appropriate for your specific circumstances and complies with all applicable laws and regulations. This document does not constitute legal advice.
         Below is the structured draft for your query:

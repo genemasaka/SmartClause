@@ -227,12 +227,16 @@ def clean_markdown(text: str) -> tuple[str, bool]:
     cleaned_text = re.sub(r'\\|\*', '', cleaned_text)
     cleaned_text = cleaned_text.replace('{.underline}', '')
     
-    special_phrases = {
+    # Fix common AI-generated spelling errors in legal documents
+    # These corrections should happen BEFORE any other processing
+    spelling_corrections = {
+        "THEREFOREE": "THEREFORE",
+        "WHEREOFF": "WHEREOF",
         "NOW, THEREFOREE": "NOW, THEREFORE",
         "IN WITNESS WHEREOFF": "IN WITNESS WHEREOF"
     }
     
-    for incorrect, correct in special_phrases.items():
+    for incorrect, correct in spelling_corrections.items():
         cleaned_text = cleaned_text.replace(incorrect, correct)
     
     escaped_text = html.escape(cleaned_text.strip())
@@ -309,6 +313,8 @@ def format_affidavit_docx(doc, content: str):
 
 def format_contract_docx(doc, content: str):
     """Apply specific formatting for contract documents in DOCX"""
+    content = content.replace("THEREFOREE", "THEREFORE")
+    content = content.replace("WHEREOFF", "WHEREOF")
     paragraphs = content.split('\n\n')
     title_added = False
     
@@ -438,6 +444,8 @@ def format_affidavit_pdf(pdf: FPDF, content: str):
 
 def format_contract_pdf(pdf: FPDF, content: str):
     """Apply specific formatting for contract documents in PDF"""
+    content = content.replace("THEREFOREE", "THEREFORE")
+    content = content.replace("WHEREOFF", "WHEREOF")
     paragraphs = content.split('\n\n')
     title_added = False
     
