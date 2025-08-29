@@ -215,20 +215,27 @@ class LegalDocumentPDF(FPDF):
         self.multi_cell(0, 10, text)
         self.ln(5)
 
+
 def clean_markdown(text: str) -> tuple[str, bool]:
-    """Remove markdown symbols except square brackets, escape HTML, and return the clean text and whether it was bold"""
+    """Remove markdown symbols except square brackets, escape HTML, and return clean text"""
+    # Don't treat everything as bold - only actual markdown bold markers
     is_bold = False
     cleaned_text = text
     
-    if '**' in text:
-        cleaned_text = text.replace('**', '')
+    # Only consider it bold if it has explicit ** markdown markers
+    if text.startswith('**') and text.endswith('**') and len(text) > 4:
+        cleaned_text = text[2:-2]  # Remove ** markers
         is_bold = True
+    elif '**' in text:
+        # Remove ** but don't mark as bold unless it's a clear title/header
+        cleaned_text = text.replace('**', '')
+        is_bold = False
     
+    # Clean other markdown
     cleaned_text = re.sub(r'\\|\*', '', cleaned_text)
     cleaned_text = cleaned_text.replace('{.underline}', '')
     
-    # Fix common AI-generated spelling errors in legal documents
-    # These corrections should happen BEFORE any other processing
+    # Fix common AI-generated spelling errors
     spelling_corrections = {
         "THEREFOREE": "THEREFORE",
         "WHEREOFF": "WHEREOF",
@@ -875,13 +882,132 @@ def enhance_sidebar():
                         st.error("✗ Invalid phone number format. Use 254XXXXXXXXX. If this issue persists, please report it using the Feedback tab in the Help Guide.")
             st.markdown('</div>', unsafe_allow_html=True)
 
+def is_clause_title(text: str) -> bool:
+    """
+    Determine if a paragraph is a clause title.
+    Improved logic to avoid false positives on content.
+    """
+    cleaned = text.strip().upper()
+    # Check for common clause patterns: e.g., "1. TITLE" or "ARTICLE 1: TITLE"
+    if re.match(r'^(ARTICLE\s)?\d+\.?\s*[A-Z\s]+$', cleaned):
+        return True
+    # Check if short and all uppercase words
+    words = cleaned.split()
+    if len(words) < 8 and all(word.isupper() for word in words if word not in ['AND', 'OF', 'THE', 'IN', 'WITH']):
+        return True
+    return False
+
+def format_contract_html(content: str) -> str:
+    """Format contract content as HTML with fixed bolding and centering"""
+    html = ''
+    paragraphs = re.split(r'\n{2,}', content.strip())
+    is_first_para = True
+
+    for para in paragraphs:
+        para_text = para.strip()
+        if not para_text:
+            continue
+
+        clean_text, markdown_bold = clean_markdown(para_text)
+        is_title = is_clause_title(clean_text) or markdown_bold
+
+        if is_first_para:
+            # Main contract title: centered, bold, larger
+            html += f'<h2 style="text-align: center; font-weight: bold; margin-bottom: 20px;">{clean_text}</h2>'
+            is_first_para = False
+        elif "IMPORTANT DISCLAIMER" in clean_text.upper():
+            # Disclaimer: bold, italic, perhaps smaller
+            html += f'<p style="font-weight: bold; font-style: italic; margin-top: 30px;">{clean_text}</p>'
+        elif is_title:
+            # Clause titles: bold, not centered
+            html += f'<p style="font-weight: bold; margin-top: 15px; margin-bottom: 10px;">{clean_text}</p>'
+        else:
+            # Regular content: not bold
+            html += f'<p class="doc-paragraph" style="text-align: justify; margin-bottom: 10px;">{clean_text}</p>'
+
+    return html
+
+def format_affidavit_html(content: str) -> str:
+    """Format affidavit content with proper HTML styling"""
+    html = ""
+    
+    # Standard affidavit headers that should be bolded and centered
+    title_sections = [
+        "REPUBLIC OF KENYA",
+        "IN THE MATTER OF THE OATHS AND STATUTORY DECLARATIONS ACT",
+        "(CAP 15 OF THE LAWS OF KENYA)",
+        "AFFIDAVIT"
+    ]
+    
+    # Add title headers
+    for title in title_sections:
+        html += f'<h6 class="doc-title" style="text-align: center; font-weight: bold; text-decoration: underline; color: var(--document-text-color, #000000); opacity: 1;">{title}</h6>'
+    
+    html += '<div style="margin-top: 14px;"></div>'
+    
+    paragraphs = content.split('\n\n')
+    
+    for para_text in paragraphs:
+        para_text = para_text.strip()
+        if not para_text:
+            continue
+            
+        # Skip title sections we already added
+        if any(title in para_text for title in title_sections):
+            continue
+        
+        # Handle "THAT" statements - only bold "THAT" itself
+        if re.match(r'^\d*\.?\s*THAT\s', para_text, re.IGNORECASE):
+            # Extract the number and THAT statement
+            match = re.match(r'^(\d+\.\s+)?(THAT\s)(.+)', para_text, re.IGNORECASE)
+            if match:
+                number = match.group(1) or ''
+                that_word = match.group(2)
+                remainder = match.group(3)
+                
+                clean_remainder, _ = clean_markdown(remainder)
+                
+                html += '<p class="doc-paragraph">'
+                if number:
+                    html += f'{number}'
+                
+                html += f'<span style="font-weight: bold; text-decoration: underline;">{that_word.upper()}</span>{clean_remainder}'
+                html += '</p>'
+            else:
+                # Fallback if regex doesn't match
+                clean_text, _ = clean_markdown(para_text)
+                html += f'<p class="doc-paragraph">{clean_text}</p>'
+        
+        # Handle "SWORN" section - bold the sworn declarations
+        elif "SWORN" in para_text.upper():
+            lines = para_text.split('\n')
+            for line in lines:
+                clean_line, _ = clean_markdown(line)
+                if clean_line and ("SWORN" in clean_line.upper() or "COMMISSIONER" in clean_line.upper()):
+                    html += f'<p class="doc-paragraph" style="font-weight: bold;">{clean_line}</p>'
+                elif clean_line:
+                    html += f'<p class="doc-paragraph">{clean_line}</p>'
+        
+        # Handle "IN THE MATTER OF" additional headers
+        elif para_text.upper().startswith("IN THE MATTER OF") and para_text not in title_sections:
+            clean_text, _ = clean_markdown(para_text)
+            html += f'<h6 class="doc-title" style="text-align: center; font-weight: bold; text-decoration: underline;">{clean_text}</h6>'
+        
+        else:
+            # Regular paragraph content - no bold formatting
+            clean_text, _ = clean_markdown(para_text)
+            html += f'<p class="doc-paragraph">{clean_text}</p>'
+    
+    return html
+
 def format_document_html(content: str) -> str:
-    """Convert document content to formatted HTML for display in the web interface with theme awareness"""
+    """Convert document content to formatted HTML with proper styling - fixed version"""
     session_id = st.session_state.get("session_id", "unknown")
     logger.info('{"event": "format_document_html", "session_id": "%s", "content_length": %d}', session_id, len(content))
 
     doc_type = identify_document_type(content)
     
+    # Base HTML structure
     html = f"""
     <div class="legal-document" style="
         font-family: 'Times New Roman', serif; 
@@ -901,105 +1027,33 @@ def format_document_html(content: str) -> str:
             max-height: none !important;
             overflow: visible !important;
         }}
+        .doc-paragraph {{
+            margin-bottom: 10px;
+            text-align: justify;
+            font-size: 14px;
+        }}
+        .doc-title {{
+            margin-bottom: 8px;
+            font-size: 14px;
+        }}
     </style>
     """
     
+    # Format based on document type
     if doc_type == "affidavit":
-        title_sections = [
-            "REPUBLIC OF KENYA",
-            "IN THE MATTER OF THE OATHS AND STATUTORY DECLARATIONS ACT",
-            "(CAP 15 OF THE LAWS OF KENYA)",
-            "AFFIDAVIT",
-        ]
-        
-        for title in title_sections:
-            html += f'<h6 class="doc-title" style="text-align: center; font-weight: bold; text-decoration: underline; color: var(--document-text-color, #000000); opacity: 1;">{title}</h6>'
-        
-        html += '<div style="margin-top: 14px; "></div>'
-        
-        paragraphs = content.split('\n\n')
-        
-        for para_text in paragraphs:
-            para_text = para_text.strip()
-            if not para_text:
-                continue
-                
-            if any(title in para_text for title in title_sections):
-                continue
-            
-            if "THAT" in para_text:
-                match = re.match(r'(\d+\.\s+)?(\*\*)?THAT(\*\*)?(.+)', para_text)
-                if match:
-                    number = match.group(1) or ''
-                    remainder = match.group(4)
-                    
-                    clean_remainder, is_bold = clean_markdown(remainder)
-                    
-                    html += '<p class="doc-paragraph">'
-                    if number:
-                        html += f'{number}'
-                    
-                    html += '<span style="font-weight: bold; text-decoration: underline;">THAT</span> '
-                    
-                    if is_bold:
-                        html += f'<span style="font-weight: bold;">{clean_remainder}</span>'
-                    else:
-                        html += clean_remainder
-                    
-                    html += '</p>'
-            
-            elif "SWORN" in para_text:
-                lines = para_text.split('\n')
-                for line in lines:
-                    clean_line, _ = clean_markdown(line)
-                    if clean_line:
-                        html += f'<p class="doc-paragraph" style="font-weight: bold;">{clean_line}</p>'
-            
-            else:
-                clean_text, is_bold = clean_markdown(para_text)
-                if is_bold:
-                    html += f'<p class="doc-paragraph" style="font-weight: bold;">{clean_text}</p>'
-                else:
-                    html += f'<p class="doc-paragraph">{clean_text}</p>'
-    
+        html += format_affidavit_html(content)
     elif doc_type == "contract":
-        paragraphs = content.split('\n\n')
-        title_added = False
-        
-        for para_text in paragraphs:
-            para_text = para_text.strip()
-            if not para_text:
-                continue
-                
-            if not title_added and ("CONTRACT" in para_text.upper() or "AGREEMENT" in para_text.upper()):
-                html += '<h6 class="doc-title" style="text-align: center; font-weight: bold; text-decoration: underline; color: var(--document-text-color, #000000); opacity: 1;">CONTRACT AGREEMENT</h6>'
-                title_added = True
-                continue
-            
-            if re.match(r'^ARTICLE\s+\d+:', para_text, re.IGNORECASE):
-                parts = para_text.split(':', 1)
-                if len(parts) == 2:
-                    title, content = parts
-                    html += f'<p class="doc-paragraph"><span style="font-weight: bold;">{title}:</span>{content}</p>'
-                else:
-                    html += f'<p class="doc-paragraph" style="font-weight: bold;">{para_text}</p>'
-            elif "WHEREAS:" in para_text:
-                html += f'<p class="doc-paragraph"><span style="font-weight: bold;">WHEREAS:</span>{para_text[8:]}</p>'
-            elif "NOW, THEREFORE" in para_text:
-                html += f'<p class="doc-paragraph"><span style="font-weight: bold;">NOW, THEREFORE</span>{para_text[13:]}</p>'
-            elif "IN WITNESS WHEREOF" in para_text:
-                html += f'<p class="doc-paragraph"><span style="font-weight: bold;">IN WITNESS WHEREOF</span>{para_text[17:]}</p>'
-            else:
-                clean_text, is_bold = clean_markdown(para_text)
-                if is_bold:
-                    html += f'<p class="doc-paragraph" style="font-weight: bold;">{clean_text}</p>'
+        html += format_contract_html(content)
+    else:
+        # Other document types - simple paragraph formatting
+        for para in re.split(r'\n{2,}', content.strip()):
+            if para.strip():
+                clean_text, markdown_bold = clean_markdown(para.strip())
+                is_title = is_clause_title(clean_text) or markdown_bold
+                if is_title:
+                    html += f'<p style="font-weight: bold;">{clean_text}</p>'
                 else:
                     html += f'<p class="doc-paragraph">{clean_text}</p>'
-    
-    else:
-        for para in content.split('\n\n'):
-            if para.strip():
-                html += f'<p class="doc-paragraph">{para.strip()}</p>'
     
     html += '</div>'
     return html
@@ -1103,7 +1157,7 @@ def main():
     else:
         logo_path = "assets/smartclause_logo_dark.png"
 
-    st.logo(logo_path, size="medium")
+    st.logo(logo_path, size="large")
     
     st.markdown("""
     <style>

@@ -257,100 +257,168 @@ class DocumentGenerator:
 
     @staticmethod
     def _create_prompt(filled_template: str, query: str) -> str:
-        """Create AI prompt with template and query, enhanced for affidavit variations"""
-        return f"""
-        You are the Leading Professional Kenyan Legal Document Drafting AI Agent.
+        """Create AI prompt with template and query, enhanced for comprehensive document generation"""
         
-        Operational Profile and Primary Objective:
-        Expert in generating precise, compliant Kenyan legal documents across domains, with unwavering accuracy, adherence to local standards, and professional formatting.
+        # Detect document type from query
+        query_lower = query.lower()
+        is_contract = any(keyword in query_lower for keyword in ["contract", "agreement", "deal", "partnership", "service", "supply"])
+        is_affidavit = any(keyword in query_lower for keyword in ["affidavit", "sworn", "declaration", "oath", "ntsa", "name change"])
+        
+        if is_contract:
+            return f"""
+            You are Kenya's Leading Professional Legal Document Drafting AI Agent specializing in COMPREHENSIVE CONTRACTS.
+            
+            🎯 PRIMARY OBJECTIVE: Generate a detailed, legally compliant Kenyan contract of MINIMUM 3000 WORDS.
+            
+            📏 CRITICAL LENGTH REQUIREMENT: 
+            - MINIMUM 3000 WORDS of substantive legal content
+            - This is MANDATORY and NON-NEGOTIABLE
+            - Write extensively with [[sensible]] detailed explanations
+            
+            🏗️ MANDATORY COMPREHENSIVE STRUCTURE (Write extensively for each):
+            
+            **1. PARTIES AND CAPACITY** (250+ words)
+            - Full legal names, registration numbers, physical addresses
+            - Corporate authority and capacity to contract
+            - Representative authority and signing powers
+            - Contact details and communication procedures
+            
+            **2. RECITALS AND BACKGROUND** (350+ words)  
+            - Detailed business context and relationship history
+            - Commercial objectives and strategic goals
+            - Market conditions and industry context
+            - Regulatory environment and compliance framework
+            
+            **3. DEFINITIONS AND INTERPRETATION** (500+ words)
+            Include 30+ comprehensive definitions covering:
+            - Technical and industry-specific terms
+            - Commercial concepts and performance metrics
+            - Legal procedures and compliance requirements
+            - Communication and notification terms
+            - Financial and payment-related concepts
+            
+            **4. SCOPE OF WORK/SERVICES/SUPPLY** (600+ words)
+            - Detailed specifications and requirements
+            - Deliverables with comprehensive acceptance criteria
+            - Performance standards and quality metrics
+            - Timeline requirements and milestone procedures
+            - Change management and variation procedures
+            - Resource allocation and responsibility matrix
+            
+            **5. CONSIDERATION AND PAYMENT TERMS** (400+ words)
+            - Detailed payment schedules and methods
+            - Comprehensive invoicing procedures
+            - Late payment penalties and interest calculations
+            - Price adjustment mechanisms and procedures
+            - Currency provisions and exchange rate handling
+            - Tax responsibilities and VAT procedures
+            
+            **6. TERM AND COMMENCEMENT** (250+ words)
+            - Effective date and commencement procedures
+            - Contract duration and milestone schedules
+            - Renewal options and extension procedures
+            - Early termination scenarios and procedures
+            
+            **7. PERFORMANCE OBLIGATIONS** (450+ words)
+            - Detailed responsibilities of each party
+            - Performance monitoring and reporting procedures
+            - Key performance indicators and measurement
+            - Quality assurance and control procedures
+            - Remediation procedures for non-performance
+            - Continuous improvement requirements
+            
+            **8. WARRANTIES AND REPRESENTATIONS** (300+ words)
+            - Express warranties and performance guarantees
+            - Fitness for purpose declarations
+            - Compliance representations and ongoing obligations
+            - Warranty period and remedy procedures
+            
+            **9. LIMITATION OF LIABILITY** (300+ words)
+            - Comprehensive liability caps and exclusions
+            - Consequential damage limitations
+            - Carve-outs for gross negligence and fraud
+            - Insurance coordination and coverage requirements
+            
+            **10. INDEMNIFICATION** (250+ words)
+            - Mutual indemnification obligations
+            - Defense and settlement procedures
+            - Notice requirements and cooperation obligations
+            - Cost allocation and expense procedures
+            
+            **11. INSURANCE AND RISK MANAGEMENT** (300+ words)
+            - Required insurance coverage and limits
+            - Certificate requirements and renewal procedures
+            - Additional insured obligations
+            - Risk assessment and mitigation procedures
+            
+            **12. INTELLECTUAL PROPERTY RIGHTS** (350+ words)
+            - Pre-existing IP ownership and protection
+            - Work product ownership and licensing
+            - Infringement procedures and remedies
+            - IP development and collaboration procedures
+            
+            **13. CONFIDENTIALITY AND DATA PROTECTION** (400+ words)
+            - Comprehensive confidentiality obligations
+            - Data protection compliance (Kenya DPA 2019)
+            - Security measures and breach procedures
+            - Cross-border data transfer restrictions
+            
+            **14. FORCE MAJEURE** (200+ words)
+            - Comprehensive definition of force majeure events
+            - Notification and documentation procedures
+            - Mitigation and resumption protocols
+            - Cost allocation during force majeure periods
+            
+            **15. COMPLIANCE AND REGULATORY** (300+ words)
+            - Legal and regulatory compliance obligations
+            - Audit rights and inspection procedures
+            - Regulatory change adaptation procedures
+            - Ethics and anti-corruption compliance
+            
+            **16. TERMINATION** (350+ words)
+            - Comprehensive termination grounds (cause and convenience)
+            - Notice periods and termination procedures
+            - Effect of termination on ongoing obligations
+            - Post-termination cooperation and transition
+            
+            **17. DISPUTE RESOLUTION** (350+ words)
+            - Multi-tier dispute resolution procedures
+            - Negotiation requirements and timeframes
+            - Mediation procedures and institution selection
+            - Arbitration rules and enforcement procedures
+            
+            **18. GOVERNING LAW AND JURISDICTION** (200+ words)
+            - Choice of law provisions and rationale
+            - Jurisdiction and venue selection
+            - Service of process procedures
+            - Judgment enforcement mechanisms
+            
+            **Plus Additional Clauses**: Amendment, Assignment, Notices, Entire Agreement, Severability, Counterparts
+            
+            📝 CONTENT EXPANSION STRATEGIES:
+            1. Write detailed sub-clauses (a), (b), (c) under each main clause
+            2. Include specific examples: "For example, in the event that..."
+            3. Add step-by-step procedures for all obligations
+            4. Explain commercial rationale for each provision
+            5. Include comprehensive risk scenarios and management
+            6. Add operational workflows and implementation details
+            
+            🇰🇪 KENYAN LEGAL COMPLIANCE:
+            - Constitution of Kenya, 2010
+            - Law of Contract Act (Cap. 23)
+            - Companies Act, 2015
+            - Data Protection Act, 2019
+            - Consumer Protection Act, 2012
+            - Employment Act, 2007
+            
+            🔧 INTELLIGENT DEFAULTS (when context is minimal):
+            - Industry-standard commercial terms
+            - Professional liability requirements
+            - Standard dispute resolution procedures
+            - Comprehensive compliance frameworks
+            - Risk management provisions
 
-        Key Principles and Capabilities:
-        - Strictly follow Kenyan legal frameworks, structures, and terminology.
-        - Use dynamic templates with contextual placeholders for user-specific details.
-        - Validate outputs against requirements, preserving jurisdictional nuances.
-        - Support varied complexities and formats while minimizing unnecessary jargon.
-        - For affidavits, dynamically customize the generic template based on the query's specific type (e.g., name change, NTSA force transfer). 
-          Incorporate type-specific headings, clauses, and language to ensure consistency with Kenyan standards under the Oaths and Statutory Declarations Act (Cap. 15).
-          Do not use separate templates; adapt the provided one.
-        - For contracts, write **substantive content** with:
-          - **2–4 paragraphs** *or* **(a)–(h) sub-clauses** (and sub-points i., ii., iii. where helpful).
-          - **Minimum 120–200 words per clause** (more if needed to be complete).
-          - Avoid contradictions and cross-reference other clauses by number where apt.
-          - Concrete obligations, time frames, dependencies, carve-outs, process steps, and local-law compliance notes.
-          - No placeholders like "as may be agreed" unless paired with a mechanism (e.g., "agreement via written notice under Clause 20 within 5 Business Days").
-          - No summarised/telegraphic lines; write full sentences.
-          - Use Kenyan legal practice (Constitution of Kenya 2010; Law of Contract Act (Cap. 23); Companies Act 2015; Data Protection Act 2019; etc.) when pertinent.
-          - **Do not shorten for brevity.** Err on the side of completeness.
-
-        Compliance Focus:
-        Reference and align with core legislation, including:
-        - Constitution of Kenya, 2010
-        - Companies Act, 2015 (No. 17 of 2015)
-        - Land Registration Act, 2012 (No. 3 of 2012)
-        - Employment Act, 2007 (No. 11 of 2007)
-        - Law of Contract Act (Cap. 23)
-        - Labour Relations Act, 2007 (No. 14 of 2007)
-        - Oaths and Statutory Declarations Act (Cap. 15) for all affidavits
-        - Traffic Act (Cap. 403) and NTSA regulations for vehicle-related affidavits (e.g., force transfer, loss of number plate)
-        - Registration of Documents Act (Cap. 285) and Births and Deaths Registration Act (Cap. 149) for name-related affidavits (e.g., change, confirmation)
-        - Relevant sectoral regulations (e.g., Data Protection Act, 2019 for privacy matters; Children Act, 2022 for custody affidavits).
-
-        Affidavit-Specific Guidance:
-        - Always start with the standard header: "REPUBLIC OF KENYA" / "IN THE MATTER OF THE OATHS AND STATUTORY DECLARATIONS ACT" / "(CAP 15 OF THE LAWS OF KENYA)" / "AFFIDAVIT".
-        - Customize the title and content based on query: e.g., add "IN THE MATTER OF [SPECIFIC ISSUE]" (like "CHANGE OF NAME" or "LOSS OF VEHICLE NUMBER PLATE").
-        - Include deponent details, numbered "THAT" statements tailored to the type (e.g., for NTSA force transfer: statements on vehicle ownership, reason for transfer, non-fraudulent intent; for name change: birth name, new name, reasons, no deceit).
-        - End with standard closing: verification clause, sworn details, commissioner signature.
-        - Examples of nuances:
-          - Name Change/Confirmation: Reference birth certificate, reasons (e.g., marriage, error correction), declaration of no fraudulent intent; align with Gazette publication requirements.
-          - NTSA Force Transfer: Include vehicle reg/chassis/engine numbers, purchase details, reason (e.g., deceased owner), new owner info; comply with NTSA/TIMS rules.
-          - NTSA Loss of Number Plate: Statements on circumstances of loss, police report reference, no involvement in crime; require OB number.
-          - Custody: Child details, relationship, best interest reasons; reference Children Act.
-        - Ensure all statements are factual, non-contradictory, and sworn "to the best of knowledge."
-
-        Contract-Specific Guidance:
-        - Always include a 'Definition of Terms' where all terms are clearly defined.
-        - Use clear and verbose language to cover all the bases.
-        - Include any relevant clauses from the list below and adapt them as necessary according to the users requested contract type:
-                1.Title and Parties
-                2.Recitals/Background
-                3.Definitions and Interpretation
-                4.Scope of Work/Services/Supply
-                5.Term and Commencement
-                6.Consideration and Payment Terms
-                7.Performance Obligations
-                8.Force Majeure
-                9.Limitation of Liability
-                10.Indemnification
-                11.Insurance
-                12.Compliance with Laws
-                13.Confidentiality
-                14.Intellectual Property
-                15.Variation/Amendment
-                16.Assignment and Novation
-                17.Termination
-                18.Dispute Resolution
-                19.Governing Law and Jurisdiction
-                20.Notices
-                21.Entire Agreement
-                22.Severability
-                23.Waiver
-                24.Counterparts and Electronic Signatures
-                25.Data Protection and Privacy
-                26.Competition Law Compliance
-                27.Environmental and Social Compliance
-                28.Anti-Money Laundering.
-        - Include all necessary details to avoid disputes.
-
-        Communication Style:
-        - Professional, clear, and unambiguous.
-        - Transparent on limitations; always recommend legal review.
-
-        Operational Workflow:
-        1. Analyze user input for document type and parameters.
-        2. Select and populate appropriate template, customizing for affidavit variants.
-        3. Generate document with guidance on legal considerations.
-
-        Important Instructions:
+            Important Instructions:
         1. Adhere exactly to template structure, but adapt content for query specifics.
         2. Ensure accurate spelling and grammar throughout the document.
         3. Output only the document content and disclaimer.
@@ -359,10 +427,67 @@ class DocumentGenerator:
         6. Always append this disclaimer:
 
         **IMPORTANT DISCLAIMER:** This document is a template and may not be suitable for all situations. You should consult with a qualified legal professional in Kenya to ensure that this document is appropriate for your specific circumstances and complies with all applicable laws and regulations. This document does not constitute legal advice.
-        Below is the structured draft for your query:
-        {filled_template}
-        Query: {query}
-        """
+            
+            Base Template: {filled_template}
+            User Query: {query}
+            
+            
+            """
+            
+        elif is_affidavit:
+            return f"""
+            You are Kenya's Leading Affidavit Specialist with expert knowledge of sworn document requirements.
+            
+            🎯 OBJECTIVE: Generate a comprehensive Kenyan affidavit of MINIMUM 800 WORDS.
+            
+            📏 LENGTH REQUIREMENT: 800+ words of substantive sworn statements and legal content.
+            
+            🏛️ PROPER AFFIDAVIT STRUCTURE:
+            
+            **STANDARD HEADER**:
+            REPUBLIC OF KENYA
+            IN THE MATTER OF THE OATHS AND STATUTORY DECLARATIONS ACT
+            (CAP 15 OF THE LAWS OF KENYA)
+            IN THE MATTER OF [CUSTOMIZE BASED ON PURPOSE]
+            AFFIDAVIT
+            
+            **DEPONENT INFORMATION** (100+ words):
+            Complete personal details, addresses, capacity
+            
+            **COMPREHENSIVE SWORN STATEMENTS** (600+ words):
+            8-15 detailed "THAT" statements customized for:
+            
+            - **Name Change**: Birth details, reasons, gazette requirements, non-fraudulent declarations
+            - **NTSA/Vehicle**: Vehicle details, ownership proof, transfer reasons, compliance declarations  
+            - **Loss Declaration**: Circumstances, police reports, recovery efforts, non-involvement declarations
+            - **Custody**: Child welfare, relationship details, best interest factors, compliance obligations
+            - **General**: Comprehensive factual statements relevant to the matter
+            
+            **PROPER CLOSING** (100+ words):
+            Standard sworn format with commissioner details
+            
+            🇰🇪 LEGAL COMPLIANCE:
+            - Oaths and Statutory Declarations Act (Cap. 15)
+            - Relevant sectoral legislation
+            - Proper legal format and procedures
+
+        [[[[[Important Instructions:]]]]]
+        1. Adhere exactly to template structure, but adapt content for query specifics.
+        2. Ensure accurate spelling and grammar throughout the document.
+        3. Output only the document content and disclaimer.
+        4. Avoid any additional explanations, commentary, or sections.
+        5. End immediately after the disclaimer.
+        6. Always append this disclaimer:
+
+        **IMPORTANT DISCLAIMER:** This document is a template and may not be suitable for all situations. You should consult with a qualified legal professional in Kenya to ensure that this document is appropriate for your specific circumstances and complies with all applicable laws and regulations. This document does not constitute legal advice.
+            
+            Base Template: {filled_template}
+            User Query: {query}
+            
+            GENERATE: A comprehensive 800+ word affidavit with detailed sworn statements.
+            """
+            
+        
 
     def generate_document(self, query: str) -> Optional[str]:
         """Generate document from query with natural language handling"""
@@ -393,6 +518,20 @@ class DocumentGenerator:
         except Exception as e:
             self.logger.error(f"Document generation failed: {e}", exc_info=True)
             return None
+
+def _validate_contract_length(self, content: str, min_words: int = 3000) -> tuple[bool, int]:
+    """Validate contract meets minimum word count requirement"""
+    # Remove common legal formatting to get accurate word count
+    clean_content = content.replace("WHEREAS", "").replace("NOW THEREFORE", "")
+    clean_content = re.sub(r'\n+', ' ', clean_content)
+    clean_content = re.sub(r'\s+', ' ', clean_content.strip())
+    
+    words = clean_content.split()
+    word_count = len(words)
+    
+    is_valid = word_count >= min_words
+    self.logger.info(f"Contract validation - Word count: {word_count}, Required: {min_words}, Valid: {is_valid}")
+    return is_valid, word_count
 
 def setup_environment() -> Tuple[TemplateManager, OpenAIModel]:
     """Setup environment and dependencies (OpenAI version)"""
