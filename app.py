@@ -18,11 +18,13 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from fpdf import FPDF
 import io
 import re
+from bot import init_sidebar_chatbot, show_chatbot_in_sidebar, SidebarChatbot
 import time
 import html
 import bleach
 from payment_verification import PaymentVerification, init_payment_state, update_payment_status, handle_download_request, reset_payment_state
-import base64
+
+
 
 # Configure structured logging
 logging.basicConfig(
@@ -48,6 +50,16 @@ def init_session_state():
         except Exception as e:
             logger.error('{"event": "generator_init_failed", "error": "%s"}', str(e), exc_info=True)
             st.error("Unable to initialize the application. Please try again later. If this issue persists, please report it using the Feedback tab in the Help Guide.")
+    
+    if "prompt_key_counter" not in st.session_state:
+        st.session_state.prompt_key_counter = 0
+    if "prompt_value" not in st.session_state:
+        st.session_state.prompt_value = ""
+
+    # ADD THIS SINGLE LINE - Initialize chatbot after generator is ready
+    if "generator" in st.session_state and "sidebar_chatbot" not in st.session_state:
+        init_sidebar_chatbot(st.session_state.generator)
+
     if "mpesa" not in st.session_state:
         st.session_state.mpesa = MpesaHandler()
         logger.info('{"event": "mpesa_handler_initialized", "status": "success"}')
@@ -72,6 +84,10 @@ def init_session_state():
     if not setup_fonts():
         st.warning("Some fonts are missing. Documents may not display correctly.")
     init_payment_state()
+    
+    # Initialize chatbot
+    if "generator" in st.session_state:
+        init_sidebar_chatbot(st.session_state.generator)
 
 def validate_input(input_value, input_type):
     """
@@ -826,6 +842,10 @@ def show_help_section():
 def enhance_sidebar():
     """Enhanced sidebar with additional information"""
     with st.sidebar:
+        # ADD THIS SINGLE LINE at the top of the sidebar
+        show_chatbot_in_sidebar()
+        
+        # Your existing sidebar content remains exactly the same
         st.header("Document Quality Tips")
         st.info("""
         To get the best results:
@@ -1059,34 +1079,61 @@ def format_document_html(content: str) -> str:
     return html
 
 def show_main_content():
-    
-    st.markdown('<p style="font-size: 16px; color: #888888;">Generate professional legal documents compliant with Kenyan law</p>', unsafe_allow_html=True)
+    # --- one-time init for resettable chat input ---
+    if "prompt_key_counter" not in st.session_state:
+        st.session_state.prompt_key_counter = 0
+
+    st.markdown(
+        '<p style="font-size: 16px; color: #888888;">Generate professional legal documents compliant with Kenyan law</p>',
+        unsafe_allow_html=True
+    )
 
     if st.session_state.show_welcome:
         show_welcome_modal()
     show_help_section()
-    
+
     chat_container = st.container()
-    
+
     with chat_container:
         for message in st.session_state.messages:
+            # only show the assistant messages before a doc has been generated
             if message["role"] == "user" or (message["role"] == "assistant" and not st.session_state.document_generated_successfully):
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
-    
+
+    # Document preview (if generated)
     if st.session_state.document_generated_successfully and st.session_state.current_document:
         st.markdown('<div class="document-preview">', unsafe_allow_html=True)
         st.markdown(format_document_html(st.session_state.current_document), unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
-    
+
+    # Download buttons (if allowed)
     if st.session_state.show_download and st.session_state.current_document:
         show_download_buttons()
 
-    if prompt := st.chat_input("Describe your legal document needs, e.g., 'Draft a contract for...'"):
+    # --- CSS: prevent the main chat input from being permanently stretched ---
+    # (Change 'none' to 'vertical' if you still want users to drag it taller temporarily.)
+    st.markdown("""
+    <style>
+    div[data-testid="stChatInput"] textarea {
+        resize: none;          /* prevent manual resize; use 'vertical' if preferred */
+        min-height: 120px;     /* default compact height */
+        max-height: 320px;     /* guardrail if you switch to 'vertical' */
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # --- Main chat input with a rotating key so it remounts after success ---
+    prompt = st.chat_input(
+        "Describe your legal document needs, e.g., 'Draft a contract for...'",
+        key=f"chat_input_{st.session_state.prompt_key_counter}",
+    )
+
+    if prompt:
         session_id = st.session_state.get("session_id", "unknown")
         if st.session_state.show_welcome:
             st.session_state.show_welcome = False
-            
+
         with st.chat_message("user"):
             st.markdown(prompt)
 
@@ -1094,40 +1141,58 @@ def show_main_content():
 
         with st.chat_message("assistant"):
             response_placeholder = st.empty()
-            
             st.session_state.generation_in_progress = True
-            
+
             try:
                 with st.spinner("Generating your document..."):
                     if validate_input(prompt, 'prompt'):
                         sanitized_prompt = sanitize_text(prompt)
                         preview, success = generate_document(st.session_state.generator, sanitized_prompt)
                     else:
-                        preview = "Invalid prompt. Please enter a description between 5 and 1000 characters. If this issue persists, please report it using the Feedback tab in the Help Guide."
+                        preview = (
+                            "Invalid prompt. Please enter a description between 5 and 1000 characters. "
+                            "If this issue persists, please report it using the Feedback tab in the Help Guide."
+                        )
                         success = False
-                        logger.warning('{"event": "invalid_prompt_input", "session_id": "%s", "prompt_length": %d}', 
-                                       session_id, len(prompt))
-                
+                        logger.warning(
+                            '{"event": "invalid_prompt_input", "session_id": "%s", "prompt_length": %d}',
+                            session_id, len(prompt)
+                        )
+
                 if success:
                     formatted_html = format_document_html(preview)
                     response_placeholder.markdown(formatted_html, unsafe_allow_html=True)
                 else:
                     response_placeholder.markdown(preview)
+
             except Exception as e:
-                logger.error('{"event": "main_content_error", "session_id": "%s", "error": "%s"}', session_id, str(e), exc_info=True)
-                response_placeholder.markdown("An unexpected error occurred. Please try again later. If this issue persists, please report it using the Feedback tab in the Help Guide.")
+                logger.error(
+                    '{"event": "main_content_error", "session_id": "%s", "error": "%s"}',
+                    session_id, str(e), exc_info=True
+                )
+                response_placeholder.markdown(
+                    "An unexpected error occurred. Please try again later. "
+                    "If this issue persists, please report it using the Feedback tab in the Help Guide."
+                )
             finally:
                 st.session_state.generation_in_progress = False
 
+            # Update session after generation attempt
             st.session_state.messages.append({"role": "assistant", "content": preview})
             st.session_state.document_generated_successfully = success
             st.session_state.show_payment = success
+
             if success:
                 st.session_state.current_document = preview
                 st.session_state.show_download = True
                 st.session_state.force_sidebar_open = True
+
+                # === Key bit: bump the key so the chat input remounts at default height ===
+                st.session_state.prompt_key_counter += 1
+
                 show_download_buttons()
                 st.rerun()
+
 
 def main():
     # --- Theme change detection for dynamic logo switching ---
