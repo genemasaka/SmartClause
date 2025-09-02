@@ -654,7 +654,7 @@ def show_welcome_modal():
                 ### Quick Start
                 1. Type your request naturally
                 2. Wait for document generation
-                3. Review the document
+                3. You can ask the assistant to review or edit your generated document — just ask the assistant in the sidebar.
                 4. Make payment via M-PESA
                 5. Download your document
                 
@@ -797,7 +797,7 @@ def show_help_section():
             **Q: How secure is my information?**  
             A: Your information is held temporarily in memory during your active session and is not stored persistently by the app after the session ends. 
                Data transmitted to external services (e.g., M-PESA for payments and the AI model for document generation) is sent over secure connections, 
-               but storage by these services is subject to their privacy policies. We recommend reviewing M-PESA and Google’s (Gemini AI) privacy terms for details on how they handle your data.
+               but storage by these services is subject to their privacy policies. We recommend reviewing M-PESA and OpenAI’s privacy terms for details on how they handle your data.
             
             **Q: Can I modify the generated document?**  
             A: Yes, you can request modifications by providing specific changes needed in your prompt.
@@ -813,7 +813,7 @@ def show_help_section():
                         
             📱 Need Help?
                 Email: smartclause6@gmail.com
-                Call: +254 XXX XXX XXX
+                Call: +254 758 533 458
             """)
             
         with tabs[4]:
@@ -1117,7 +1117,7 @@ def show_main_content():
     <style>
     div[data-testid="stChatInput"] textarea {
         resize: none;          /* prevent manual resize; use 'vertical' if preferred */
-        min-height: 120px;     /* default compact height */
+        min-height: 30px;     /* default compact height */
         max-height: 320px;     /* guardrail if you switch to 'vertical' */
     }
     </style>
