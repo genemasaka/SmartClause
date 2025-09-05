@@ -25,7 +25,6 @@ import bleach
 from payment_verification import PaymentVerification, init_payment_state, update_payment_status, handle_download_request, reset_payment_state
 
 
-
 # Configure structured logging
 logging.basicConfig(
     level=logging.INFO,
@@ -37,6 +36,7 @@ handler.setFormatter(logging.Formatter(
     '{"timestamp": "%(asctime)s", "name": "%(name)s", "level": "%(levelname)s", "message": %(message)s}'
 ))
 logger.handlers = [handler]
+
 
 def init_session_state():
     """Initialize session state variables"""
@@ -56,7 +56,7 @@ def init_session_state():
     if "prompt_value" not in st.session_state:
         st.session_state.prompt_value = ""
 
-    # ADD THIS SINGLE LINE - Initialize chatbot after generator is ready
+    # Initialize chatbot after generator is ready
     if "generator" in st.session_state and "sidebar_chatbot" not in st.session_state:
         init_sidebar_chatbot(st.session_state.generator)
 
@@ -89,26 +89,21 @@ def init_session_state():
     if "generator" in st.session_state:
         init_sidebar_chatbot(st.session_state.generator)
 
+
 def validate_input(input_value, input_type):
     """
     Enhanced validation with additional security checks
     """
     if input_type == 'phone':
-        # Existing phone validation
         return input_value.startswith("254") and len(input_value) == 12 and input_value.isdigit()
     
     elif input_type == 'email':
-        # Enhanced email validation with additional security checks
         if not input_value:
             return False
-        
-        # Check for injection attempts
         dangerous_chars = ['\n', '\r', '\t', '<', '>', '"', "'"]
         if any(char in input_value for char in dangerous_chars):
             logger.warning("Potentially malicious email input blocked")
             return False
-        
-        # Basic email regex
         import re
         pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
         return bool(re.match(pattern, input_value))
@@ -116,13 +111,10 @@ def validate_input(input_value, input_type):
     elif input_type == 'prompt':
         if not input_value or len(input_value) > 1000 or len(input_value.strip()) < 5:
             return False
-        
-        # Additional check for excessive special characters (potential obfuscation)
         special_char_ratio = sum(1 for c in input_value if not c.isalnum() and not c.isspace()) / len(input_value)
-        if special_char_ratio > 0.3:  # More than 30% special characters
+        if special_char_ratio > 0.3:
             logger.warning("Input with excessive special characters blocked")
             return False
-        
         return True
     
     elif input_type == 'feedback':
@@ -132,6 +124,7 @@ def validate_input(input_value, input_type):
     
     return False
 
+
 def sanitize_text(text):
     """
     Enhanced sanitize text input to remove potential malicious content
@@ -140,7 +133,6 @@ def sanitize_text(text):
     if not text:
         return text
     
-    # First, remove javascript: URLs and other dangerous protocols
     dangerous_protocols = [
         r'javascript\s*:',
         r'vbscript\s*:',
@@ -152,15 +144,11 @@ def sanitize_text(text):
     for protocol in dangerous_protocols:
         cleaned_text = re.sub(protocol, '', cleaned_text, flags=re.IGNORECASE)
     
-    # Remove HTML tags using bleach
     cleaned_text = bleach.clean(cleaned_text, tags=[], strip=True)
-    
-    # Clean up extra whitespace that might be left from nested tags
     cleaned_text = re.sub(r'\s+', ' ', cleaned_text.strip())
     
-    # Additional safety: Remove any remaining event handlers
     dangerous_attributes = [
-        r'on\w+\s*=',  # onclick, onload, onerror, etc.
+        r'on\w+\s*=',
         r'href\s*=\s*["\']?\s*javascript:',
         r'src\s*=\s*["\']?\s*javascript:',
     ]
@@ -169,6 +157,7 @@ def sanitize_text(text):
         cleaned_text = re.sub(attr, '', cleaned_text, flags=re.IGNORECASE)
     
     return cleaned_text
+
 
 class UnicodeAwarePDF(FPDF):
     def __init__(self):
@@ -184,6 +173,7 @@ class UnicodeAwarePDF(FPDF):
         wmax = (w - 2 * self.c_margin) * 1000 / self.font_size
         text = txt.replace('\r', '')
         super().multi_cell(w, h, text, border, align, fill)
+
 
 class KenyanLegalDocument:
     def clean_text_for_pdf(text: str) -> str:
@@ -212,6 +202,7 @@ class KenyanLegalDocument:
                 
         return cleaned_text
 
+
 class LegalDocumentPDF(FPDF):
     def __init__(self):
         super().__init__()
@@ -234,24 +225,19 @@ class LegalDocumentPDF(FPDF):
 
 def clean_markdown(text: str) -> tuple[str, bool]:
     """Remove markdown symbols except square brackets, escape HTML, and return clean text"""
-    # Don't treat everything as bold - only actual markdown bold markers
     is_bold = False
     cleaned_text = text
     
-    # Only consider it bold if it has explicit ** markdown markers
     if text.startswith('**') and text.endswith('**') and len(text) > 4:
-        cleaned_text = text[2:-2]  # Remove ** markers
+        cleaned_text = text[2:-2]
         is_bold = True
     elif '**' in text:
-        # Remove ** but don't mark as bold unless it's a clear title/header
         cleaned_text = text.replace('**', '')
         is_bold = False
     
-    # Clean other markdown
     cleaned_text = re.sub(r'\\|\*', '', cleaned_text)
     cleaned_text = cleaned_text.replace('{.underline}', '')
     
-    # Fix common AI-generated spelling errors
     spelling_corrections = {
         "THEREFOREE": "THEREFORE",
         "WHEREOFF": "WHEREOF",
@@ -265,6 +251,7 @@ def clean_markdown(text: str) -> tuple[str, bool]:
     escaped_text = html.escape(cleaned_text.strip())
     return escaped_text, is_bold
 
+
 def identify_document_type(content: str) -> str:
     """Identify if the document is an affidavit or contract"""
     if "OATHS AND STATUTORY DECLARATIONS ACT" in content:
@@ -272,6 +259,7 @@ def identify_document_type(content: str) -> str:
     elif "CONTRACT" in content.upper() or "AGREEMENT" in content.upper():
         return "contract"
     return "other"
+
 
 def format_affidavit_docx(doc, content: str):
     """Apply specific formatting for affidavit documents in DOCX"""
@@ -334,6 +322,7 @@ def format_affidavit_docx(doc, content: str):
             if is_bold:
                 run.bold = True
 
+
 def format_contract_docx(doc, content: str):
     """Apply specific formatting for contract documents in DOCX"""
     content = content.replace("THEREFOREE", "THEREFORE")
@@ -381,6 +370,7 @@ def format_contract_docx(doc, content: str):
             if is_bold:
                 run.bold = True
 
+
 def convert_to_docx(content: str) -> bytes:
     """Convert text content to DOCX format with appropriate formatting"""
     session_id = st.session_state.get("session_id", "unknown")
@@ -408,6 +398,7 @@ def convert_to_docx(content: str) -> bytes:
         logger.error('{"event": "docx_conversion_failed", "session_id": "%s", "error": "%s"}', session_id, str(e), exc_info=True)
         st.error("Failed to generate DOCX document. Please try again later. If this issue persists, please report it using the Feedback tab in the Help Guide.")
         return None
+
 
 def format_affidavit_pdf(pdf: FPDF, content: str):
     """Apply specific formatting for affidavit documents in PDF"""
@@ -465,6 +456,7 @@ def format_affidavit_pdf(pdf: FPDF, content: str):
         
         pdf.ln(5)
 
+
 def format_contract_pdf(pdf: FPDF, content: str):
     """Apply specific formatting for contract documents in PDF"""
     content = content.replace("THEREFOREE", "THEREFORE")
@@ -516,6 +508,7 @@ def format_contract_pdf(pdf: FPDF, content: str):
         
         pdf.ln(5)
 
+
 def convert_to_pdf(content: str) -> bytes:
     """Convert document content to PDF with appropriate formatting"""
     session_id = st.session_state.get("session_id", "unknown")
@@ -545,6 +538,7 @@ def convert_to_pdf(content: str) -> bytes:
         logger.error('{"event": "pdf_conversion_failed", "session_id": "%s", "error": "%s"}', session_id, str(e), exc_info=True)
         st.error("Failed to generate PDF document. Please try again later. If this issue persists, please report it using the Feedback tab in the Help Guide.")
         return None
+
 
 def show_download_buttons():
     """Display persistent download buttons for the document"""
@@ -595,6 +589,7 @@ def show_download_buttons():
             logger.error('{"event": "download_preparation_failed", "session_id": "%s", "error": "%s"}', session_id, str(e), exc_info=True)
             st.error("An error occurred while preparing the download. Please try again later. If this issue persists, please report it using the Feedback tab in the Help Guide.")
 
+
 def generate_document(generator: DocumentGenerator, prompt: str) -> tuple[Optional[str], bool]:
     session_id = st.session_state.get("session_id", "unknown")
     try:
@@ -613,6 +608,7 @@ def generate_document(generator: DocumentGenerator, prompt: str) -> tuple[Option
         logger.error('{"event": "document_generation_error", "session_id": "%s", "error": "%s"}', session_id, str(e), exc_info=True)
         return "An error occurred while generating the document. Please try again later. If this issue persists, please report it using the Feedback tab in the Help Guide.", False
 
+
 def validate_phone_number(phone: str) -> bool:
     """Validate the phone number format"""
     session_id = st.session_state.get("session_id", "unknown")
@@ -620,6 +616,7 @@ def validate_phone_number(phone: str) -> bool:
         return True
     logger.warning('{"event": "invalid_phone_number", "session_id": "%s", "phone_length": %d}', session_id, len(phone))
     return False
+
 
 class DocumentPricing:
     """Handles pricing logic for different document types"""
@@ -636,6 +633,7 @@ class DocumentPricing:
         elif "CONTRACT" in content.upper() or "AGREEMENT" in content.upper():
             return DocumentPricing.PRICES["contract"]
         return DocumentPricing.PRICES["other"]
+
 
 def show_welcome_modal():
     """Shows a welcome modal with updated quick start guide"""
@@ -677,7 +675,6 @@ def show_welcome_modal():
                 - Sensitive information is encrypted
                 - Documents are compliant with Kenyan law
                 """)
-
             if not st.session_state.get("generation_in_progress", False):
                 if st.button("Got it!", key="welcome_close"):
                     st.session_state.show_welcome = False
@@ -685,6 +682,7 @@ def show_welcome_modal():
                         st.rerun()
             else:
                 st.button("Got it!", key="welcome_close", disabled=True)
+
 
 def send_feedback_email(feedback: str, user_email: str = ""):
     """Send feedback email to smartclause6@gmail.com"""
@@ -714,6 +712,7 @@ def send_feedback_email(feedback: str, user_email: str = ""):
     except Exception as e:
         logger.error('{"event": "feedback_email_failed", "session_id": "%s", "error": "%s"}', session_id, str(e), exc_info=True)
         raise Exception("Failed to send feedback. Please try again later. If this issue persists, please report it using the Feedback tab in the Help Guide.")
+
 
 def show_help_section():
     """Shows the comprehensive help section with feedback tab"""
@@ -759,13 +758,12 @@ def show_help_section():
         with tabs[2]:
             st.markdown("""
             ### Best Practices for Document Generation
-            
             1. **Be Specific in Your Request**
                - Include full names of all parties
                - Specify dates and deadlines
                - Detail all terms and conditions
                - Mention specific requirements
-            
+
             2. **Include Essential Details**
                - Business/Company names
                - Registration numbers
@@ -773,13 +771,13 @@ def show_help_section():
                - Contact information
                - Monetary values
                - Time periods
-            
+
             3. **Consider Legal Requirements**
                - Jurisdiction specifications
                - Regulatory compliance needs
                - Required certifications
                - Witness requirements
-            
+
             4. **Document Review**
                - Always read thoroughly
                - Check for accuracy
@@ -839,13 +837,13 @@ def show_help_section():
                     else:
                         st.warning("Please enter your feedback before submitting.")
 
+
 def enhance_sidebar():
     """Enhanced sidebar with additional information"""
     with st.sidebar:
-        # ADD THIS SINGLE LINE at the top of the sidebar
+        # Sidebar chatbot
         show_chatbot_in_sidebar()
         
-        # Your existing sidebar content remains exactly the same
         st.header("Document Quality Tips")
         st.info("""
         To get the best results:
@@ -902,24 +900,24 @@ def enhance_sidebar():
                         st.error("✗ Invalid phone number format. Use 254XXXXXXXXX. If this issue persists, please report it using the Feedback tab in the Help Guide.")
             st.markdown('</div>', unsafe_allow_html=True)
 
+
 def is_clause_title(text: str) -> bool:
     """
     Determine if a paragraph is a clause title.
     Improved logic to avoid false positives on content.
     """
     cleaned = text.strip().upper()
-    # Check for common clause patterns: e.g., "1. TITLE" or "ARTICLE 1: TITLE"
     if re.match(r'^(ARTICLE\s)?\d+\.?\s*[A-Z\s]+$', cleaned):
         return True
-    # Check if short and all uppercase words
     words = cleaned.split()
     if len(words) < 8 and all(word.isupper() for word in words if word not in ['AND', 'OF', 'THE', 'IN', 'WITH']):
         return True
     return False
 
+
 def format_contract_html(content: str) -> str:
     """Format contract content as HTML with fixed bolding and centering"""
-    html = ''
+    html_out = ''
     paragraphs = re.split(r'\n{2,}', content.strip())
     is_first_para = True
 
@@ -932,26 +930,22 @@ def format_contract_html(content: str) -> str:
         is_title = is_clause_title(clean_text) or markdown_bold
 
         if is_first_para:
-            # Main contract title: centered, bold, larger
-            html += f'<h2 style="text-align: center; font-weight: bold; margin-bottom: 20px;">{clean_text}</h2>'
+            html_out += f'<h2 style="text-align: center; font-weight: bold; margin-bottom: 20px;">{clean_text}</h2>'
             is_first_para = False
         elif "IMPORTANT DISCLAIMER" in clean_text.upper():
-            # Disclaimer: bold, italic, perhaps smaller
-            html += f'<p style="font-weight: bold; font-style: italic; margin-top: 30px;">{clean_text}</p>'
+            html_out += f'<p style="font-weight: bold; font-style: italic; margin-top: 30px;">{clean_text}</p>'
         elif is_title:
-            # Clause titles: bold, not centered
-            html += f'<p style="font-weight: bold; margin-top: 15px; margin-bottom: 10px;">{clean_text}</p>'
+            html_out += f'<p style="font-weight: bold; margin-top: 15px; margin-bottom: 10px;">{clean_text}</p>'
         else:
-            # Regular content: not bold
-            html += f'<p class="doc-paragraph" style="text-align: justify; margin-bottom: 10px;">{clean_text}</p>'
+            html_out += f'<p class="doc-paragraph" style="text-align: justify; margin-bottom: 10px;">{clean_text}</p>'
 
-    return html
+    return html_out
+
 
 def format_affidavit_html(content: str) -> str:
     """Format affidavit content with proper HTML styling"""
-    html = ""
+    html_out = ""
     
-    # Standard affidavit headers that should be bolded and centered
     title_sections = [
         "REPUBLIC OF KENYA",
         "IN THE MATTER OF THE OATHS AND STATUTORY DECLARATIONS ACT",
@@ -959,11 +953,10 @@ def format_affidavit_html(content: str) -> str:
         "AFFIDAVIT"
     ]
     
-    # Add title headers
     for title in title_sections:
-        html += f'<h6 class="doc-title" style="text-align: center; font-weight: bold; text-decoration: underline; color: var(--document-text-color, #000000); opacity: 1;">{title}</h6>'
+        html_out += f'<h6 class="doc-title" style="text-align: center; font-weight: bold; text-decoration: underline; color: var(--document-text-color, #000000); opacity: 1;">{title}</h6>'
     
-    html += '<div style="margin-top: 14px;"></div>'
+    html_out += '<div style="margin-top: 14px;"></div>'
     
     paragraphs = content.split('\n\n')
     
@@ -972,13 +965,10 @@ def format_affidavit_html(content: str) -> str:
         if not para_text:
             continue
             
-        # Skip title sections we already added
         if any(title in para_text for title in title_sections):
             continue
         
-        # Handle "THAT" statements - only bold "THAT" itself
         if re.match(r'^\d*\.?\s*THAT\s', para_text, re.IGNORECASE):
-            # Extract the number and THAT statement
             match = re.match(r'^(\d+\.\s+)?(THAT\s)(.+)', para_text, re.IGNORECASE)
             if match:
                 number = match.group(1) or ''
@@ -987,38 +977,35 @@ def format_affidavit_html(content: str) -> str:
                 
                 clean_remainder, _ = clean_markdown(remainder)
                 
-                html += '<p class="doc-paragraph">'
+                html_out += '<p class="doc-paragraph">'
                 if number:
-                    html += f'{number}'
+                    html_out += f'{number}'
                 
-                html += f'<span style="font-weight: bold; text-decoration: underline;">{that_word.upper()}</span>{clean_remainder}'
-                html += '</p>'
+                html_out += f'<span style="font-weight: bold; text-decoration: underline;">{that_word.upper()}</span>{clean_remainder}'
+                html_out += '</p>'
             else:
-                # Fallback if regex doesn't match
                 clean_text, _ = clean_markdown(para_text)
-                html += f'<p class="doc-paragraph">{clean_text}</p>'
+                html_out += f'<p class="doc-paragraph">{clean_text}</p>'
         
-        # Handle "SWORN" section - bold the sworn declarations
         elif "SWORN" in para_text.upper():
             lines = para_text.split('\n')
             for line in lines:
                 clean_line, _ = clean_markdown(line)
                 if clean_line and ("SWORN" in clean_line.upper() or "COMMISSIONER" in clean_line.upper()):
-                    html += f'<p class="doc-paragraph" style="font-weight: bold;">{clean_line}</p>'
+                    html_out += f'<p class="doc-paragraph" style="font-weight: bold;">{clean_line}</p>'
                 elif clean_line:
-                    html += f'<p class="doc-paragraph">{clean_line}</p>'
+                    html_out += f'<p class="doc-paragraph">{clean_line}</p>'
         
-        # Handle "IN THE MATTER OF" additional headers
         elif para_text.upper().startswith("IN THE MATTER OF") and para_text not in title_sections:
             clean_text, _ = clean_markdown(para_text)
-            html += f'<h6 class="doc-title" style="text-align: center; font-weight: bold; text-decoration: underline;">{clean_text}</h6>'
+            html_out += f'<h6 class="doc-title" style="text-align: center; font-weight: bold; text-decoration: underline;">{clean_text}</h6>'
         
         else:
-            # Regular paragraph content - no bold formatting
             clean_text, _ = clean_markdown(para_text)
-            html += f'<p class="doc-paragraph">{clean_text}</p>'
+            html_out += f'<p class="doc-paragraph">{clean_text}</p>'
     
-    return html
+    return html_out
+
 
 def format_document_html(content: str) -> str:
     """Convert document content to formatted HTML with proper styling - fixed version"""
@@ -1027,8 +1014,8 @@ def format_document_html(content: str) -> str:
 
     doc_type = identify_document_type(content)
     
-    # Base HTML structure
-    html = f"""
+    # Root wrapper (no embedded <style> here)
+    html_out = f"""
     <div class="legal-document" style="
         font-family: 'Times New Roman', serif; 
         line-height: 1.5; 
@@ -1039,47 +1026,38 @@ def format_document_html(content: str) -> str:
         color: var(--document-text-color, #000000); 
         border: 1px solid rgba(128, 128, 128, 0.2); 
         overflow: visible !important; 
+        height: auto !important;
         min-height: 100px;
         display: block;
+        max-height: none !important;
+        word-wrap: break-word;
+        box-sizing: border-box;
     ">
-    <style>
-        .legal-document * {{
-            max-height: none !important;
-            overflow: visible !important;
-        }}
-        .doc-paragraph {{
-            margin-bottom: 10px;
-            text-align: justify;
-            font-size: 14px;
-        }}
-        .doc-title {{
-            margin-bottom: 8px;
-            font-size: 14px;
-        }}
-    </style>
     """
-    
-    # Format based on document type
+
     if doc_type == "affidavit":
-        html += format_affidavit_html(content)
+        html_out += format_affidavit_html(content)
     elif doc_type == "contract":
-        html += format_contract_html(content)
+        html_out += format_contract_html(content)
     else:
-        # Other document types - simple paragraph formatting
-        for para in re.split(r'\n{2,}', content.strip()):
+        paragraphs = re.split(r'\n{2,}', content.strip())
+        for i, para in enumerate(paragraphs):
             if para.strip():
                 clean_text, markdown_bold = clean_markdown(para.strip())
                 is_title = is_clause_title(clean_text) or markdown_bold
                 if is_title:
-                    html += f'<p style="font-weight: bold;">{clean_text}</p>'
+                    html_out += f'<p style="font-weight: bold; max-height: none !important; height: auto !important; overflow: visible !important;">{clean_text}</p>'
                 else:
-                    html += f'<p class="doc-paragraph">{clean_text}</p>'
+                    html_out += f'<p class="doc-paragraph">{clean_text}</p>'
     
-    html += '</div>'
-    return html
+    html_out += '</div>'
+    
+    logger.info('{"event": "format_document_html_complete", "session_id": "%s", "html_length": %d}', session_id, len(html_out))
+    return html_out
+
 
 def show_main_content():
-    # --- one-time init for resettable chat input ---
+    # one-time init for resettable chat input
     if "prompt_key_counter" not in st.session_state:
         st.session_state.prompt_key_counter = 0
 
@@ -1099,31 +1077,80 @@ def show_main_content():
             # only show the assistant messages before a doc has been generated
             if message["role"] == "user" or (message["role"] == "assistant" and not st.session_state.document_generated_successfully):
                 with st.chat_message(message["role"]):
+                    # messages are plain text (no unsafe_allow_html here)
                     st.markdown(message["content"])
-
     # Document preview (if generated)
     if st.session_state.document_generated_successfully and st.session_state.current_document:
+        html = format_document_html(st.session_state.current_document)
         st.markdown('<div class="document-preview">', unsafe_allow_html=True)
-        st.markdown(format_document_html(st.session_state.current_document), unsafe_allow_html=True)
+        st.markdown(html, unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
     # Download buttons (if allowed)
     if st.session_state.show_download and st.session_state.current_document:
         show_download_buttons()
 
-    # --- CSS: prevent the main chat input from being permanently stretched ---
-    # (Change 'none' to 'vertical' if you still want users to drag it taller temporarily.)
+    # CSS: prevent the main chat input from being permanently stretched
     st.markdown("""
     <style>
     div[data-testid="stChatInput"] textarea {
         resize: none;          /* prevent manual resize; use 'vertical' if preferred */
-        min-height: 30px;     /* default compact height */
+        min-height: 30px;      /* default compact height */
         max-height: 320px;     /* guardrail if you switch to 'vertical' */
     }
-    </style>
+    
+/* === NON-COPY: fully visible doc but disable selection/copy === */
+.legal-document, .legal-document * {
+  -webkit-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
+  user-select: none !important;
+}
+.legal-document img, .legal-document a {
+  -webkit-user-drag: none; user-drag: none;
+}
+</style>
+<script>
+(function(){
+  function insideLegalDoc(node){
+    while (node) {
+      if (node.classList && node.classList.contains('legal-document')) return true;
+      node = node.parentNode;
+    }
+    return false;
+  }
+  document.addEventListener('copy', function(e){
+    const sel = window.getSelection && window.getSelection();
+    if ((sel && insideLegalDoc(sel.anchorNode)) || insideLegalDoc(e.target)) {
+      e.preventDefault();
+    }
+  }, true);
+  document.addEventListener('cut', function(e){
+    const sel = window.getSelection && window.getSelection();
+    if ((sel && insideLegalDoc(sel.anchorNode)) || insideLegalDoc(e.target)) {
+      e.preventDefault();
+    }
+  }, true);
+  document.addEventListener('contextmenu', function(e){
+    if (insideLegalDoc(e.target)) {
+      e.preventDefault();
+    }
+  }, true);
+  document.addEventListener('keydown', function(e){
+    const key = (e.key || '').toLowerCase();
+    if ((e.ctrlKey || e.metaKey) && ['c','x','a','s','p','u'].includes(key)) {
+      const sel = window.getSelection && window.getSelection();
+      if (sel && insideLegalDoc(sel.anchorNode)) {
+        e.preventDefault();
+      }
+    }
+  }, true);
+})();
+</script>
+
     """, unsafe_allow_html=True)
 
-    # --- Main chat input with a rotating key so it remounts after success ---
+    # Main chat input with a rotating key so it remounts after success
     prompt = st.chat_input(
         "Describe your legal document needs, e.g., 'Draft a contract for...'",
         key=f"chat_input_{st.session_state.prompt_key_counter}",
@@ -1187,7 +1214,7 @@ def show_main_content():
                 st.session_state.show_download = True
                 st.session_state.force_sidebar_open = True
 
-                # === Key bit: bump the key so the chat input remounts at default height ===
+                # Remount chat input at default height
                 st.session_state.prompt_key_counter += 1
 
                 show_download_buttons()
@@ -1195,14 +1222,14 @@ def show_main_content():
 
 
 def main():
-    # --- Theme change detection for dynamic logo switching ---
+    # Theme change detection for dynamic logo switching
     current_theme = st.get_option("theme.base")
     if "_last_theme" not in st.session_state:
         st.session_state["_last_theme"] = current_theme
     elif st.session_state["_last_theme"] != current_theme:
         st.session_state["_last_theme"] = current_theme
         st.experimental_rerun()
-    # --- End theme change detection ---
+    # End theme change detection
 
     st.set_page_config(
         page_title="SmartClause",
@@ -1224,13 +1251,13 @@ def main():
 
     st.logo(logo_path, size="large")
     
+    # === Global CSS (scoped) ===
     st.markdown("""
     <style>
-     .title-container {
-        text-align: center;
-    }
-    
-    div[data-testid="stSidebar"] .payment-card {
+     .title-container { text-align: center; }
+
+     /* Sidebar payment card: scoped to the sidebar root */
+     div[data-testid="stSidebar"] .payment-card {
         position: relative !important;
         bottom: auto;
         left: auto;
@@ -1239,131 +1266,123 @@ def main():
         border-radius: 10px;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         width: 100%;
-        margin-bottom:  20px;
-    }
-    
-    .stMarkdown, 
-    .element-container div,
-    .stChatMessage {
-        -webkit-user-select: none !important;
-        -moz-user-select: none !important;
-        -ms-user-select: none !important;
-        user-select: none !important;
-    }
-    
-    .stMarkdown *, 
-    .element-container div *,
-    .stChatMessage * {
-        -webkit-user-drag: none !important;
-        -khtml-user-drag: none !important;
-        -moz-user-drag: none !important;
-        -o-user-drag: none !important;
-        user-drag: none !important;
-    }
-    
-    .stChatMessage div[data-testid="stMarkdownContainer"] {
-        -webkit-user-select: none !important;
-        -moz-user-select: none !important;
-        -ms-user-select: none !important;
-        user-select: none !important;
-    }
-    
-    button[data-testid="StyledFullScreenButton"],
-    .stMarkdown button {
-        display: none !important;
-    }
-    
-    .legal-document {
+        margin-bottom: 20px;
+     }
+
+     /* ===== SCOPED document preview styling ONLY ===== */
+     .legal-document {
         background-color: white;
         border: 1px solid #ddd;
         box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         padding: 30px !important;
         margin: 15px 0;
         border-radius: 8px;
-    }
-    
-    .legal-document h1, .legal-document h2 {
-        margin-bottom: 15px;
-    }
-    
-    .legal-document p {
-        text-align: justify;
-    }
-    
-    .stChatMessage,
-    .stChatMessageContent, 
-    [data-testid="stChatMessageContent"],
-    [data-testid="stMarkdownContainer"],
-    .legal-document,
-    .document-preview,
-    .element-container,
-    div[data-testid="stVerticalBlock"] > div {
-        max-height: none !important;
-        overflow: visible !important;
-        height: auto !important;
-    }
-
-    .stMarkdown,
-    .stChatMessage div[data-testid="stMarkdownContainer"] {
-        max-height: none !important;
-        overflow: visible !important;
-    }
-
-    * {
-        max-height: none !important;
-    }
-
-    .legal-document {
         max-height: none !important;
         height: auto !important;
         overflow: visible !important;
-        display: block;
         width: 100%;
-    }
+     }
 
-    .stImage > img {
+     .legal-document h1, .legal-document h2 { margin-bottom: 15px; }
+
+     .legal-document p {
+        text-align: justify;
+        max-height: none !important;
+        height: auto !important;
+        overflow: visible !important;
+     }
+
+     /* Let users select/copy text inside the document; don't affect app-wide */
+     .legal-document * {
+        -webkit-user-select: text !important;
+        -moz-user-select: text !important;
+        -ms-user-select: text !important;
+        user-select: text !important;
+
+        -webkit-user-drag: none !important;
+        -khtml-user-drag: none !important;
+        -moz-user-drag: none !important;
+        -o-user-drag: none !important;
+        user-drag: none !important;
+
+        max-height: none !important;
+        height: auto !important;
+        overflow: visible !important;
+     }
+
+     .document-preview {
+        max-height: none !important;
+        height: auto !important;
+        overflow: visible !important;
+     }
+
+     .document-preview * {
+        max-height: none !important;
+        height: auto !important;
+        overflow: visible !important;
+     }
+
+     .stImage > img {
         max-width: 300px;
         height: auto;
         margin: 0 auto;
         display: block;
-    }
+     }
 
-    @media (max-width: 768px) {
+     .document-container {
+        max-height: none !important;
+        height: auto !important;
+        overflow: visible !important;
+     }
+
+     /* Ensure chat messages that contain YOUR document are fully expanded,
+        but do not touch generic Markdown or sidebar containers */
+     .stChatMessage .legal-document,
+     .stChatMessage .document-preview {
+        max-height: none !important;
+        overflow: visible !important;
+        height: auto !important;
+     }
+
+     @media (max-width: 768px) {
         .legal-document {
             padding: 20px;
             font-size: 14px;
+            max-height: none !important;
+            height: auto !important;
+            overflow: visible !important;
         }
         .doc-paragraph {
             font-size: 14px;
+            max-height: none !important;
+            height: auto !important;
         }
-        .title-container {
-            font-size: 24px;
-        }
-        .stImage > img {
-            max-width: 100%;
-        }
-        .payment-card {
-            padding: 15px;
-        }
-    }
+        .title-container { font-size: 24px; }
+        .stImage > img { max-width: 100%; }
+        .payment-card { padding: 15px; }
+     }
 
-    @media (max-width: 500px) {
+     @media (max-width: 500px) {
         .legal-document {
             padding: 10px;
             font-size: 12px;
+            max-height: none !important;
+            height: auto !important;
+            overflow: visible !important;
         }
         .doc-paragraph {
             font-size: 12px;
+            max-height: none !important;
+            height: auto !important;
         }
-        .stImage > img {
-            max-width: 100%;
-        }
-    }
+        .stImage > img { max-width: 100%; }
+     }
     </style>
     """, unsafe_allow_html=True)
 
     enhance_sidebar()
     show_main_content()
+
 
 if __name__ == "__main__":
     main()

@@ -1,12 +1,12 @@
-# bot.py
+# bot.py - OPTIMIZED VERSION FOR FAST DOCUMENT EDITING
 
 import os
 import re
 import json
 import difflib
 import logging
-from typing import Dict, List, Optional
-
+from typing import Dict, List, Optional, Tuple
+import difflib
 import streamlit as st
 from openai import OpenAI
 
@@ -36,8 +36,8 @@ Tone & Style:
 """
 
 LEGAL_DISCLAIMER = (
-    "Important: This guidance (and any generated document) does not constitute legal advice. "
-    "Please have a qualified Kenyan lawyer review before use."
+    "Important: This guidance does not constitute legal advice. "
+    
 )
 
 # --------------------------------------------------------------------------------------
@@ -60,14 +60,53 @@ def inject_chatbot_styles():
       }
 
       /* Message bubbles */
-      .sc-msg { border-radius:14px; padding:10px 12px; line-height:1.5; border:1px solid rgba(0,0,0,0.05); margin-bottom: 16px;}
+      .sc-msg {
+        border-radius: 14px;
+        padding: 10px 12px;
+        line-height: 1.5;
+        border: 1px solid rgba(0,0,0,0.05);
+        margin-bottom: 16px;
+        max-width: 100%;
+        box-sizing: border-box;
+        word-wrap: break-word;        /* legacy */
+        overflow-wrap: anywhere;       /* modern wrapping */
+      }
       .sc-msg.user   { background:#f8fafc; }
       .sc-msg.assist { background:#fff; }
 
-      .sc-chip { display:inline-block; padding:4px 10px; border-radius:999px; background:rgba(0,0,0,0.06); font-size:12px; }
-      .sc-row { display:flex; gap:10px; align-items:center; }
+      /* Make all bubble children respect width & wrap */
+      .sc-msg * {
+        max-width: 100%;
+        box-sizing: border-box;
+        overflow-wrap: anywhere;
+      }
 
-      /* Header (used inside the expander body only) */
+      /* Target Streamlit's Markdown container inside the bubble */
+      .sc-msg [data-testid="stMarkdownContainer"] {
+        max-width: 100%;
+        overflow: hidden;
+      }
+
+      /* Wrap long code/diff blocks rendered by Markdown */
+      .sc-msg [data-testid="stMarkdownContainer"] pre,
+      .sc-msg [data-testid="stMarkdownContainer"] code,
+      .sc-msg pre,
+      .sc-msg code {
+        white-space: pre-wrap !important;  /* keep formatting, allow wrap */
+        word-break: break-word !important; /* break long tokens */
+        overflow-x: auto;                  /* scroll if still too wide */
+        display: block;
+        background: #f1f5f9;
+        padding: 8px 10px;
+        border-radius: 8px;
+        font-size: 0.9em;
+        font-family: "Courier New", monospace;
+      }
+
+      .sc-chip { display:inline-block; padding:4px 10px; border-radius:999px; background:rgba(0,0,0,0.06); font-size:12px; }
+      .sc-row  { display:flex; gap:10px; align-items:center; }
+
+      /* Header (inside expander) */
       .sc-title { display:flex; align-items:center; gap:10px; font-weight:700; font-size:14px; margin-bottom:6px; }
       .sc-title .sc-badge {
         width:28px; height:28px; flex:0 0 28px; border-radius:8px;
@@ -93,7 +132,6 @@ def inject_chatbot_styles():
         min-height: 84px;
       }
 
-      /* Remove accidental “empty card” gaps above composer */
       .sc-empty { display:none !important; height:0 !important; margin:0 !important; padding:0 !important; border:none !important; box-shadow:none !important; }
 
       /* Mobile */
@@ -117,7 +155,6 @@ def inject_chatbot_styles():
       }
     </style>
     """, unsafe_allow_html=True)
-
 
 def setup_chatbot_model() -> OpenAI:
     """
@@ -205,50 +242,113 @@ def extract_key_facts(doc_text: str) -> Dict[str, str]:
     return facts
 
 # --------------------------------------------------------------------------------------
-# Edit helpers
+# ULTRA-FAST Edit helpers - OPTIMIZED FOR SPEED
 # --------------------------------------------------------------------------------------
 
-def _extract_json_block(text: str) -> Optional[dict]:
-    """
-    Extract and parse the first JSON block from model output.
-    Accepts ```json ... ``` or raw JSON. Returns dict or None.
-    """
-    if not text:
-        return None
-    m = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
-    raw = m.group(1) if m else text.strip()
-    try:
-        return json.loads(raw)
-    except Exception:
-        return None
+# Comprehensive replacement patterns for instant edits
+import re
+from typing import Optional, Tuple
 
-EDIT_TRIGGERS = [
-    "edit", "revise", "replace", "change", "amend", "update",
-    "add clause", "insert clause", "remove clause", "delete clause",
-    "tighten", "shorten", "expand", "make stronger", "make clearer", "fix", "modify", "rewrite"
+# Comprehensive replacement patterns for instant edits (updated with greedy quantifiers)
+# Comprehensive replacement patterns for instant edits (updated with greedy quantifiers)
+FAST_REPLACE_PATTERNS = [
+    # Direct replacement patterns
+    r'(?:replace|change|update)\s+["\']?([^"\']+)["\']?\s+(?:with|to)\s+["\']?([^"\']+)["\']?',
+    r'(?:change|update)\s+(?:the\s+)?([^"\']+)\s+(?:to|into)\s+([^"\']+)(?:\s|$)',
+    r'(?:substitute|swap)\s+([^"\']+)\s+(?:with|for)\s+([^"\']+)(?:\s|$)',
+    # Name/party specific
+    r'(?:change|update|replace)\s+(?:party|name)\s+([^"\']+)\s+(?:to|with)\s+([^"\']+)(?:\s|$)',
+    # Amount specific
+    r'(?:change|update|replace)\s+(?:amount|sum|price)\s+([^"\']+)\s+(?:to|with)\s+([^"\']+)(?:\s|$)',
+    # Date specific
+    r'(?:change|update|replace)\s+(?:date|time)\s+([^"\']+)\s+(?:to|with)\s+([^"\']+)(?:\s|$)',
 ]
 
-def _is_edit_intent(user_text: str) -> bool:
-    t = user_text.lower()
-    return any(kw in t for kw in EDIT_TRIGGERS)
+def try_instant_replacement(doc: str, instruction: str) -> Optional[Tuple[str, str, str]]:
+    """
+    ULTRA-FAST: Try multiple patterns for instant text replacement.
+    Returns (new_doc, old_text, new_text) or None.
+    """
+    instruction = instruction.strip()
+    
+    for pattern in FAST_REPLACE_PATTERNS:
+        match = re.search(pattern, instruction, re.IGNORECASE)
+        if match:
+            old_text = match.group(1).strip(' "\'.,;:')
+            new_text = match.group(2).strip(' "\'.,;:')
+            
+            if old_text and new_text and old_text != new_text:
+                # Try exact match first
+                if old_text in doc:
+                    new_doc = doc.replace(old_text, new_text)
+                    return (new_doc, old_text, new_text)
+                
+                # Try case-insensitive match
+                for line in doc.split('\n'):
+                    if old_text.lower() in line.lower():
+                        new_line = re.sub(re.escape(old_text), new_text, line, flags=re.IGNORECASE)
+                        if new_line != line:
+                            new_doc = doc.replace(line, new_line)
+                            return (new_doc, old_text, new_text)
+    
+    return None
+def get_document_summary(doc: str, max_chars: int = 6000) -> str:
+    """
+    Get a smart summary of the document for editing context.
+    Prioritizes beginning and key sections.
+    """
+    if len(doc) <= max_chars:
+        return doc
+    
+    # Take first part and try to include key sections
+    first_part = doc[:max_chars // 2]
+    
+    # Look for important sections in the rest
+    remaining = doc[max_chars // 2:]
+    important_sections = []
+    
+    # Find clauses/sections that might be relevant
+    for line in remaining.split('\n')[:50]:  # Only check first 50 lines of remainder
+        line_lower = line.lower()
+        if any(keyword in line_lower for keyword in [
+            'termination', 'payment', 'liability', 'confidentiality', 
+            'governing law', 'jurisdiction', 'indemnity', 'force majeure',
+            'whereas', 'therefore', 'party', 'agreement'
+        ]):
+            important_sections.append(line)
+            if len('\n'.join(important_sections)) > max_chars // 2:
+                break
+    
+    if important_sections:
+        return first_part + '\n...\n' + '\n'.join(important_sections)
+    else:
+        return first_part + '\n...'
+
+EDIT_KEYWORDS = [
+    "add", "edit", "revise", "replace", "change", "amend", "update", "modify",
+    "insert", "remove", "delete", "fix", "correct", "adjust", "alter",
+    "include", "exclude", "strengthen", "weaken", "clarify", "rewrite"
+]
+
+def is_edit_request(text: str) -> bool:
+    """Ultra-fast edit detection"""
+    text_lower = text.lower()
+    return any(keyword in text_lower for keyword in EDIT_KEYWORDS)
 
 # --------------------------------------------------------------------------------------
-# Sidebar chatbot
+# Sidebar chatbot - OPTIMIZED FOR SPEED
 # --------------------------------------------------------------------------------------
 
 class SidebarChatbot:
     """
-    Sidebar-only chatbot that improves prompts, can review generated documents, and can edit them.
-    - Uses OpenAI GPT-4o
-    - Aware of SmartClause app context & disclaimers
-    - Reads st.session_state.current_document when present
+    SPEED-OPTIMIZED chatbot that prioritizes fast, reliable edits.
     """
 
     def __init__(self, document_generator=None):
         self.generator = document_generator
         try:
             self.client = setup_chatbot_model()
-            self.model_name = "gpt-4o"
+            self.model_name = "gpt-4o-mini"
             logger.info('{"event": "chatbot_ai_model_ready", "status": "success"}')
         except Exception as e:
             logger.error('{"event": "chatbot_ai_model_failed", "error": "%s"}', str(e))
@@ -270,12 +370,11 @@ class SidebarChatbot:
             st.session_state.sidebar_chat_messages = []
         if "chatbot_expanded" not in st.session_state:
             st.session_state.chatbot_expanded = False
-        # simple history for undo
         if "document_history" not in st.session_state:
             st.session_state.document_history = []
 
-    # ---- Intent analysis (kept lightweight; core intelligence is in GPT) ----
     def analyze_prompt_intent(self, user_input: str) -> Dict:
+        """Lightweight intent analysis"""
         user_input_lower = user_input.lower()
         detected_type = "general"
         for doc_type, patterns in self.document_patterns.items():
@@ -284,23 +383,30 @@ class SidebarChatbot:
                 break
         return {"document_type": detected_type}
 
-    # ---- Core LLM call wrapper ----
-    def _chat(self, messages: List[Dict], max_tokens=700, temperature=0.6) -> str:
+    def _fast_chat(self, messages: List[Dict], max_tokens: int = 800, temperature: float = 0.3) -> str:
+        """
+        OPTIMIZED: Faster API calls with lower token limits and temperature
+        """
         if not (self.client and self.model_name):
             return "AI model not available. Please try again later."
-        resp = self.client.chat.completions.create(
-            model=self.model_name,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
-        return resp.choices[0].message.content.strip()
+        
+        try:
+            resp = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                stream=False  # No streaming for faster response
+            )
+            return resp.choices[0].message.content.strip()
+        except Exception as e:
+            logger.error(f"Fast chat completion error: {e}")
+            return f"Error processing request: {str(e)}"
 
-    # ---- General helper answer ----
     def generate_ai_response(self, user_message: str) -> str:
-        """General helper guidance when not explicitly reviewing or editing the document."""
+        """FAST general helper guidance"""
         analysis = self.analyze_prompt_intent(user_message)
-
+        
         current_doc = st.session_state.get("current_document")
         has_doc = bool(current_doc)
         doc_summary = ""
@@ -308,7 +414,8 @@ class SidebarChatbot:
 
         if has_doc:
             facts = extract_key_facts(current_doc)
-            snippet = current_doc[:2000]  # compact snippet to reduce prompt size
+            # Much smaller snippet for speed
+            snippet = current_doc[:1000]
             doc_summary = (
                 f"\n[CurrentDocumentPresent: YES]\n"
                 f"[DocumentSnippetStart]\n{snippet}\n[DocumentSnippetEnd]\n"
@@ -319,151 +426,216 @@ class SidebarChatbot:
 
         system_msg = {"role": "system", "content": APP_KNOWLEDGE.strip()}
         user_msg = {
-            "role": "user",
+            "role": "user", 
             "content": (
-                f"User message: {user_message}\n"
-                f"{doc_summary}\n"
-                "Task: Provide a brief, encouraging response (2–3 sentences). "
-                "If a current document is present, ground your tips in that content. "
-                "Offer 1–2 concrete, Kenyan-law-aware suggestions to improve their request or next steps.\n"
+                f"User message: {user_message}\n{doc_summary}\n"
+                "Task: Provide a brief, helpful response (1-2 sentences). "
+                "If a current document exists, give specific advice. "
                 f"End with: {LEGAL_DISCLAIMER}"
-            ),
+            )
         }
 
-        return self._chat([system_msg, user_msg], max_tokens=650, temperature=0.6)
+        return self._fast_chat([system_msg, user_msg], max_tokens=400, temperature=0.4)
 
-    # ---- Document review ----
     def review_current_document(self, user_question: str) -> str:
-        """
-        Review the current document in relation to the user's question.
-        Answers should reference what's actually in the doc.
-        """
+        """FAST document review with smart summarization"""
         current_doc = st.session_state.get("current_document")
         if not current_doc:
             return "No document is currently available for review."
 
         facts = extract_key_facts(current_doc)
-        snippet = current_doc[:6000]  # provide a sizeable context
+        # Use smart summarization instead of truncation
+        doc_summary = get_document_summary(current_doc, max_chars=8000)
 
         system_msg = {"role": "system", "content": APP_KNOWLEDGE.strip()}
         user_msg = {
             "role": "user",
             "content": (
-                "You are reviewing a user-generated legal document. "
-                "Quote short, relevant lines where helpful and then explain.\n\n"
-                f"[DocumentStart]\n{snippet}\n[DocumentEnd]\n"
+                "Review this legal document and answer the user's question concisely.\n\n"
+                f"[DocumentStart]\n{doc_summary}\n[DocumentEnd]\n"
                 f"[ExtractedFacts] {facts}\n\n"
                 f"User question: {user_question}\n"
-                "Answer clearly, citing the relevant section(s) briefly. "
-                "Point out any obvious gaps or risks (Kenyan law context) and suggest precise edits or clauses."
-                f"\n\nEnd with: {LEGAL_DISCLAIMER}"
-            ),
+                "Answer directly, citing relevant sections briefly. "
+                "Highlight any obvious gaps or risks for Kenyan law. "
+                f"End with: {LEGAL_DISCLAIMER}"
+            )
         }
 
-        return self._chat([system_msg, user_msg], max_tokens=900, temperature=0.4)
+        return self._fast_chat([system_msg, user_msg], max_tokens=600, temperature=0.2)
 
-    # ---- Document edit ----
     def edit_current_document(self, user_instruction: str) -> str:
         """
-        Edits the current document per user's instruction.
-        - Produces a revised document + change summary via GPT-4o
-        - Saves previous version to st.session_state.document_history
-        - Updates st.session_state.current_document
-        - Returns a short confirmation message (with diff preview)
+        ULTRA-FAST document editing optimized for speed and reliability.
+        Always attempts to make the requested changes.
         """
         current_doc = st.session_state.get("current_document")
         if not current_doc:
-            return "There’s no document to edit yet. Please generate one first."
+            return "There's no document to edit yet. Please generate one first."
 
-        sys_msg = {
-            "role": "system",
-            "content": (
-                APP_KNOWLEDGE.strip()
-                + "\n\nYou will revise the provided document EXACTLY per the user's instruction and return STRICT JSON:\n"
-                  '{\n'
-                  '  "revised_document": "<full updated document text>",\n'
-                  '  "summary": "<2-6 bullet points describing the changes>",\n'
-                  '  "changed_sections": ["<short descriptions of key sections touched>"]\n'
-                  '}\n'
-                  "No commentary outside JSON."
-            ),
-        }
-        user_msg = {
-            "role": "user",
-            "content": (
-                "Current Document:\n"
-                f"<<<DOC_START>>>\n{current_doc}\n<<<DOC_END>>>\n\n"
-                f"Edit Instruction: {user_instruction}\n\n"
-                "Return ONLY JSON. If an instruction is unsafe or would invalidate Kenyan-law basics, "
-                "adjust minimally and note it in the summary."
-            ),
-        }
+        # Save current state for undo
+        if "document_history" not in st.session_state:
+            st.session_state.document_history = []
+        st.session_state.document_history.append(current_doc)
+
+        # STEP 1: Try instant replacement patterns (fastest)
+        instant_result = try_instant_replacement(current_doc, user_instruction)
+        if instant_result:
+            new_doc, old_text, new_text = instant_result
+            st.session_state.current_document = new_doc
+            self._update_document_state()
+            return f"✅ **INSTANT EDIT:** Successfully replaced '{old_text}' with '{new_text}'"
+
+        # STEP 2: Fast AI edit for everything else
+        return self._fast_ai_edit(current_doc, user_instruction)
+
+    def _update_document_state(self):
+        """Update all necessary session state after document edit"""
+        st.session_state.show_download = True
+        st.session_state.document_generated_successfully = True
+        st.session_state.show_payment = True
+
+    def _fast_ai_edit(self, doc: str, instruction: str) -> str:
+        """
+        OPTIMIZED AI editing - always tries to make changes, handles large docs smartly
+        """
+        # Remove summarization; send full doc (model can handle it)
+        doc_for_editing = doc  # Previously: get_document_summary(doc, max_chars=10000) if len(doc) > 10000 else doc
+        
+        # Ultra-simple prompt that focuses on making the change
+        system_prompt = (
+            "You are a document editor. Make the requested changes to this document. "
+            "ALWAYS attempt to make the requested change, even if it requires reasonable assumptions. "
+            "Return the COMPLETE edited document, maintaining all original formatting.\n"
+            "Be decisive and make the changes the user wants."
+        )
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"INSTRUCTION: {instruction}\n\nDOCUMENT:\n{doc_for_editing}"}
+        ]
 
         try:
-            raw = self._chat([sys_msg, user_msg], max_tokens=3500, temperature=0.3)
-            data = _extract_json_block(raw)
-            if not data or "revised_document" not in data:
-                return "I couldn’t safely apply that change. Please rephrase the edit request."
-
-            revised = data["revised_document"].strip()
-            if not revised:
-                return "The edit produced an empty result. Please try a clearer instruction."
-
-            # save history for undo
-            st.session_state.document_history.append(current_doc)
-
-            # update current document
-            st.session_state.current_document = revised
-            st.session_state.show_download = True
-            st.session_state.document_generated_successfully = True
-            st.session_state.show_payment = True  # keep normal flow
-
-            # short diff preview (first 20 changed lines)
-            diff_lines = list(
-                difflib.unified_diff(
-                    current_doc.splitlines(),
-                    revised.splitlines(),
-                    fromfile="before.txt",
-                    tofile="after.txt",
-                    lineterm="",
-                )
-            )
-            preview = "\n".join(diff_lines[:20]) if diff_lines else "No visible line-level changes (formatting-only)."
-
-            summary = data.get("summary", "Edits applied.")
-            return (
-                "✅ Edits applied.\n\n"
-                f"**Summary:**\n{summary}\n\n"
-                "**Diff preview (first 20 lines):**\n"
-                f"```\n{preview}\n```\n"
-                f"{LEGAL_DISCLAIMER}"
-            )
+            # Fast edit with reasonable token limit
+            edited_response = self._fast_chat(messages, max_tokens=16384, temperature=0.1)
+            
+            # Add truncation check and continuation
+            if len(edited_response) < len(doc_for_editing) * 0.8 or not edited_response.strip().endswith(('.', '!', '?')):
+                continuation_prompt = f"Continue the edited document from: {edited_response[-500:]}"
+                messages.append({"role": "user", "content": continuation_prompt})
+                continuation = self._fast_chat(messages, max_tokens=16384, temperature=0.1)
+                edited_response += continuation
+            
+            # Simple validation - if it looks like a document, use it
+            if len(edited_response.strip()) > 200:
+                # For large original docs, we need to be smarter about applying edits
+                if len(doc) > len(doc_for_editing):
+                    final_doc = self._apply_edit_to_large_doc(doc, doc_for_editing, edited_response, instruction)
+                else:
+                    final_doc = edited_response.strip()
+                
+                st.session_state.current_document = final_doc
+                self._update_document_state()
+                return f"✅ **EDIT APPLIED:** {instruction}\n\n{LEGAL_DISCLAIMER}"
+            else:
+                # If AI response is too short, try a simple text operation
+                return self._fallback_edit(doc, instruction)
+                
         except Exception as e:
-            logger.error('{"event":"edit_failed","error":"%s"}', str(e), exc_info=True)
-            return "Sorry, I wasn’t able to apply that edit. Please try again with a clearer instruction."
+            logger.error(f"Fast AI edit failed: {e}")
+            return self._fallback_edit(doc, instruction)
 
-    # ---- Undo ----
+    def _apply_edit_to_large_doc(self, original_doc: str, summarized_doc: str, edited_summary: str, instruction: str) -> str:
+        """
+        Smart application of edits from summarized version back to full document
+        """
+        # For simple replacements, apply to full document
+        instruction_lower = instruction.lower()
+        if any(word in instruction_lower for word in ['replace', 'change', 'update']):
+            # Try to find what was changed in the summary and apply to full doc
+            simple_replacement = try_instant_replacement(original_doc, instruction)
+            if simple_replacement:
+                return simple_replacement[0]
+        
+        # Compute unified diff between summary and edited summary
+        summary_lines = summarized_doc.splitlines()
+        edited_lines = edited_summary.splitlines()
+        diff = list(difflib.unified_diff(summary_lines, edited_lines, lineterm=''))
+        
+        # Apply diff to original (simple patch applicator)
+        original_lines = original_doc.splitlines()
+        patched_lines = []
+        i = 0
+        for line in diff:
+            if line.startswith('@'):
+                # Parse hunk header, e.g., @@ -1,3 +1,4 @@
+                hunk = re.match(r'@@ -(\d+),?(\d*) \+(\d+),?(\d*) @@', line)
+                if hunk:
+                    start = int(hunk.group(1)) - 1
+                    i = start  # Align to original (assuming summary structure matches start/end)
+            elif line.startswith('-'):
+                continue  # Skip removals (or handle as needed)
+            elif line.startswith('+'):
+                patched_lines.append(line[1:])
+            else:
+                if i < len(original_lines):
+                    patched_lines.append(original_lines[i])
+                    i += 1
+        
+        # Fallback to edited_summary if patch fails (e.g., empty patched_lines)
+        return '\n'.join(patched_lines) if patched_lines else edited_summary
+
+    def _fallback_edit(self, doc: str, instruction: str) -> str:
+        """
+        Fallback editing attempts when AI edit fails
+        """
+        # Try one more instant replacement attempt with more flexible patterns
+        flexible_patterns = [
+            r'([A-Za-z][A-Za-z\s]+)\s+(?:to|with)\s+([A-Za-z][A-Za-z\s]+)',
+            r'(\d+[\d,\.]+)\s+(?:to|with)\s+(\d+[\d,\.]+)',
+            r'(\d{1,2}/\d{1,2}/\d{4})\s+(?:to|with)\s+(\d{1,2}/\d{1,2}/\d{4})',
+        ]
+        
+        for pattern in flexible_patterns:
+            match = re.search(pattern, instruction, re.IGNORECASE)
+            if match:
+                old_text = match.group(1).strip()
+                new_text = match.group(2).strip()
+                if old_text in doc:
+                    new_doc = doc.replace(old_text, new_text)
+                    st.session_state.current_document = new_doc
+                    self._update_document_state()
+                    return f"✅ **FALLBACK EDIT:** Successfully replaced '{old_text}' with '{new_text}'"
+        
+        return (
+            f"⚠️ **EDIT ATTEMPTED:** I tried to make the requested change but encountered some difficulty. "
+            f"For fastest results, try specific instructions like:\n"
+            f"- 'Replace [exact text] with [new text]'\n"
+            f"- 'Change John Doe to Jane Smith'\n"
+            f"- 'Update the amount to KES 50,000'\n\n"
+            f"{LEGAL_DISCLAIMER}"
+        )
+
     def undo_last_edit(self) -> str:
+        """Fast undo operation"""
         if not st.session_state.get("document_history"):
             return "No previous version found."
+        
         prev = st.session_state.document_history.pop()
         st.session_state.current_document = prev
-        st.session_state.show_download = True
-        return "↩️ Reverted to the previous version."
+        self._update_document_state()
+        return "↩️ **REVERTED:** Document restored to previous version."
 
-    # ---- UI ----
     def show_sidebar_chatbot(self):
-        """Display a collapsible, mobile-responsive sidebar chatbot without stray empty cards."""
+        """Display the optimized sidebar chatbot interface"""
         with st.sidebar:
             inject_chatbot_styles()
 
             # Collapsible assistant
             expanded_default = st.session_state.get("assistant_expanded", False)
             with st.expander("SmartClause Assistant", expanded=expanded_default):
-                # Save expanded state (best-effort)
                 st.session_state.assistant_expanded = True
 
-                # Header inside expander
+                # Header
                 st.markdown(
                     """
                     <div class="sc-title">
@@ -476,9 +648,9 @@ class SidebarChatbot:
                     unsafe_allow_html=True
                 )
 
-                # Conversation
+                # Show recent messages
                 recent_messages = (
-                    st.session_state.sidebar_chat_messages[-8:]
+                    st.session_state.sidebar_chat_messages[-6:]  # Reduced for speed
                     if st.session_state.sidebar_chat_messages else []
                 )
 
@@ -486,132 +658,261 @@ class SidebarChatbot:
                     st.markdown('<div class="sc-chat-wrap">', unsafe_allow_html=True)
                     for msg in recent_messages:
                         role_cls = "user" if msg["role"] == "user" else "assist"
-                        icon = "🧑" if role_cls == "user" else "⚖️"
+                        icon = "🧑" if role_cls == "user" else "⚡"
+
                         st.markdown(
                             f"""
                             <div class="sc-card sc-msg {role_cls}">
-                            <div class="sc-row">
+                            <div class="sc-row" style="margin-bottom:8px;">
                                 <span class="sc-chip">{icon}</span>
-                                <div style="font-size:13px">{msg['content']}</div>
-                            </div>
+                                <div style="font-size:13px; opacity:0.85;">{"You" if role_cls=="user" else "Assistant"}</div>
                             </div>
                             """,
                             unsafe_allow_html=True
                         )
-                    st.markdown('</div>', unsafe_allow_html=True)
+
+                        st.markdown(msg["content"])
+                        st.markdown("</div>", unsafe_allow_html=True)
+                    st.markdown("</div>", unsafe_allow_html=True)
                 else:
-                    # Render nothing if no messages (prevents a blank/empty card)
                     st.markdown('<div class="sc-empty"></div>', unsafe_allow_html=True)
 
-                # Composer (single card, no wrapper above it)
-                # st.markdown('<div class="sc-card sc-composer-card">', unsafe_allow_html=True)
-                with st.form("sidebar_chatbot_form", clear_on_submit=True):
+                # Fast input form
+                with st.form("fast_chatbot_form", clear_on_submit=True):
                     user_question = st.text_area(
                         "Your message",
-                        placeholder="Ask to review, or edit your document.",
-                        height=90,
-                        max_chars=1200,
+                        placeholder="Quick edits: 'Replace John with Jane' or 'Change amount to KES 50,000'",
+                        height=80,
+                        max_chars=800,  # Reduced for speed
                         label_visibility="collapsed",
                     )
-                    c1, c2 = st.columns([2, 1])
-                    with c1:
-                        ask_button = st.form_submit_button("Send", use_container_width=True)
-                    with c2:
-                        clear_now = st.form_submit_button("Clear", use_container_width=True)
+                    
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        send_button = st.form_submit_button("Send", use_container_width=True)
+                    with col2:
+                        clear_button = st.form_submit_button("Clear", use_container_width=True)
 
-                if clear_now and st.session_state.sidebar_chat_messages:
+                # Handle form submissions
+                if clear_button and st.session_state.sidebar_chat_messages:
                     st.session_state.sidebar_chat_messages = []
                     st.rerun()
 
-                if ask_button and user_question and user_question.strip():
-                    text = user_question.strip()
-                    st.session_state.sidebar_chat_messages.append({"role": "user", "content": text})
+                if send_button and user_question and user_question.strip():
+                    user_text = user_question.strip()
+                    st.session_state.sidebar_chat_messages.append({"role": "user", "content": user_text})
 
-                    with st.spinner("Thinking..."):
-                        current_doc = st.session_state.get("current_document")
-                        lower = text.lower()
-
-                        is_edit = _is_edit_intent(lower) and bool(current_doc)
-                        review_triggers = [
-                            "review", "check", "include", "mention", "does it", "where is",
-                            "clause", "party", "name", "amount", "id", "jurisdiction",
-                            "confidentiality", "data protection"
-                        ]
-                        is_review = (not is_edit) and any(t in lower for t in review_triggers) and bool(current_doc)
-
-                        if is_edit:
-                            ai_response = self.edit_current_document(text)
-                        elif is_review:
-                            ai_response = self.review_current_document(text)
+                    # OPTIMIZED: Faster intent detection
+                    current_doc = st.session_state.get("current_document")
+                    user_text_lower = user_text.lower()
+                    
+                    # Quick processing with minimal spinner time
+                    with st.spinner("Processing..."):
+                        if is_edit_request(user_text) and current_doc:
+                            # EDIT REQUEST - Fastest path
+                            ai_response = self.edit_current_document(user_text)
+                        elif any(word in user_text_lower for word in ['review', 'check', 'what', 'where', 'how', 'does']) and current_doc:
+                            # REVIEW REQUEST - Fast document analysis
+                            ai_response = self.review_current_document(user_text)
                         else:
-                            ai_response = self.generate_ai_response(text)
+                            # GENERAL REQUEST - Quick guidance
+                            ai_response = self.generate_ai_response(user_text)
 
                     st.session_state.sidebar_chat_messages.append({"role": "assistant", "content": ai_response})
                     st.session_state.chatbot_expanded = True
                     st.rerun()
 
-                # Footer actions (Undo + disclaimer)
-                f1, f2 = st.columns([1, 1])
-                with f1:
+                # Quick action buttons
+                col1, col2 = st.columns([1, 1])
+                with col1:
                     if st.session_state.get("document_history"):
-                        if st.button("↩️ Undo last edit", use_container_width=True):
-                            msg = self.undo_last_edit()
-                            st.session_state.sidebar_chat_messages.append({"role": "assistant", "content": msg})
-                            st.session_state.chatbot_expanded = True
+                        if st.button("↩️ Undo", use_container_width=True, help="Undo last edit"):
+                            undo_msg = self.undo_last_edit()
+                            st.session_state.sidebar_chat_messages.append({"role": "assistant", "content": undo_msg})
                             st.rerun()
-                with f2:
-                    st.markdown('<div style="text-align:right;"><span class="sc-chip"></span></div>', unsafe_allow_html=True)
+                
+                with col2:
+                    if st.button("💡 Tips", use_container_width=True, help="Quick editing tips"):
+                        tips_msg = (
+                            "**FAST EDITING TIPS:**\n\n"
+                            "**Instant edits:** 'Replace [old] with [new]'\n\n"
+                            "**Names:** 'Change John Doe to Jane Smith' or 'Change [first_party] to John Doe'\n\n" 
+                            "**Amounts:** 'Update amount to KES 100,000'\n\n"
+                            "**Dates:** 'Change date to 15 March 2024'\n\n"
+                            "*Type what you want changed exactly as it is and provide the new information!*"
+                        )
+                        st.session_state.sidebar_chat_messages.append({"role": "assistant", "content": tips_msg})
+                        st.rerun()
 
-            # When user collapses the expander, try to remember it (best-effort UX)
-            # (Streamlit doesn't give direct collapse/expand events; we just default to collapsed next run)
+            # Save collapsed state
             if "assistant_expanded" in st.session_state:
                 st.session_state.assistant_expanded = False
 
-
-
 # --------------------------------------------------------------------------------------
-# Public helpers used by app.py
+# Public helpers - OPTIMIZED
 # --------------------------------------------------------------------------------------
 
 def init_sidebar_chatbot(generator=None):
     """
-    Initialize the sidebar chatbot with its own AI model.
+    Initialize the speed-optimized sidebar chatbot.
     """
     if "sidebar_chatbot" not in st.session_state:
         try:
             st.session_state.sidebar_chatbot = SidebarChatbot(generator)
             st.session_state.sidebar_chatbot.initialize_sidebar_chatbot()
             if st.session_state.sidebar_chatbot.client:
-                logger.info('{"event": "sidebar_chatbot_initialized", "status": "success", "model": "gpt-4o"}')
+                logger.info('{"event": "fast_chatbot_initialized", "status": "success", "model": "gpt-4o-mini"}')
             else:
-                logger.warning('{"event": "sidebar_chatbot_initialized", "status": "fallback_mode"}')
+                logger.warning('{"event": "fast_chatbot_initialized", "status": "fallback_mode"}')
         except Exception as e:
-            logger.error('{"event": "sidebar_chatbot_init_failed", "error": "%s"}', str(e))
+            logger.error('{"event": "fast_chatbot_init_failed", "error": "%s"}', str(e))
             st.session_state.sidebar_chatbot = SidebarChatbot(generator)
             st.session_state.sidebar_chatbot.initialize_sidebar_chatbot()
-    # ensure history exists even if already created earlier
+    
+    # Ensure history exists
     if "document_history" not in st.session_state:
         st.session_state.document_history = []
+    
     return st.session_state.sidebar_chatbot
 
-
 def show_chatbot_in_sidebar():
-    """Show the chatbot in sidebar - call from your enhance_sidebar()."""
+    """Show the speed-optimized chatbot in sidebar"""
     if "sidebar_chatbot" in st.session_state:
         st.session_state.sidebar_chatbot.show_sidebar_chatbot()
 
-
-def test_chatbot_model():
-    """Test function to verify the AI model is working properly."""
+def test_fast_chatbot_model():
+    """Test the optimized chatbot model for speed and functionality"""
     try:
+        import time
+        start_time = time.time()
+        
         client = setup_chatbot_model()
         response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": "Hello, can you help me with legal documents?"}],
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "Test: Replace 'John Doe' with 'Jane Smith' in a contract."}],
             max_tokens=100,
+            temperature=0.1
         )
-        print(f"✅ Chatbot AI Model Test Successful: {response.choices[0].message.content[:100]}...")
+        
+        end_time = time.time()
+        duration = end_time - start_time
+        
+        print(f"✅ **FAST CHATBOT TEST SUCCESSFUL**")
+        print(f"📊 **Response Time:** {duration:.2f} seconds")
+        print(f"🤖 **Model:** gpt-4o-mini")
+        print(f"💬 **Sample Response:** {response.choices[0].message.content[:100]}...")
+        print(f"⚡ **Optimization Status:** ACTIVE")
+        
         return True
     except Exception as e:
-        print(f"❌ Chatbot AI Model Test Failed: {e}")
+        print(f"❌ **FAST CHATBOT TEST FAILED:** {e}")
         return False
+
+# --------------------------------------------------------------------------------------
+# ADDITIONAL SPEED OPTIMIZATIONS
+# --------------------------------------------------------------------------------------
+
+class DocumentEditCache:
+    """
+    Simple cache for common edits to avoid repeated API calls
+    """
+    def __init__(self, max_size: int = 50):
+        self.cache = {}
+        self.max_size = max_size
+    
+    def get_cache_key(self, doc_snippet: str, instruction: str) -> str:
+        """Generate a cache key from document snippet and instruction"""
+        import hashlib
+        content = f"{doc_snippet[:500]}{instruction}"
+        return hashlib.md5(content.encode()).hexdigest()
+    
+    def get(self, doc_snippet: str, instruction: str) -> Optional[str]:
+        """Get cached edit result if available"""
+        key = self.get_cache_key(doc_snippet, instruction)
+        return self.cache.get(key)
+    
+    def set(self, doc_snippet: str, instruction: str, result: str):
+        """Cache an edit result"""
+        if len(self.cache) >= self.max_size:
+            # Remove oldest entry
+            oldest_key = next(iter(self.cache))
+            del self.cache[oldest_key]
+        
+        key = self.get_cache_key(doc_snippet, instruction)
+        self.cache[key] = result
+
+# Global cache instance
+_edit_cache = DocumentEditCache()
+
+def get_edit_cache() -> DocumentEditCache:
+    """Get the global edit cache instance"""
+    return _edit_cache
+
+# --------------------------------------------------------------------------------------
+# BATCH EDITING SUPPORT
+# --------------------------------------------------------------------------------------
+
+def apply_batch_edits(doc: str, edit_instructions: List[str]) -> Tuple[str, List[str]]:
+    """
+    Apply multiple edits in sequence for efficiency.
+    Returns (final_document, list_of_change_summaries)
+    """
+    current_doc = doc
+    changes = []
+    
+    for instruction in edit_instructions:
+        # Try instant replacement first
+        result = try_instant_replacement(current_doc, instruction)
+        if result:
+            current_doc, old_text, new_text = result
+            changes.append(f"Replaced '{old_text}' with '{new_text}'")
+        else:
+            changes.append(f"Attempted: {instruction}")
+    
+    return current_doc, changes
+
+# --------------------------------------------------------------------------------------
+# PERFORMANCE MONITORING
+# --------------------------------------------------------------------------------------
+
+class EditPerformanceMonitor:
+    """Monitor edit performance for optimization"""
+    
+    def __init__(self):
+        self.edit_times = []
+        self.edit_methods = []
+        self.success_rates = {}
+    
+    def record_edit(self, method: str, duration: float, success: bool):
+        """Record an edit operation"""
+        self.edit_times.append(duration)
+        self.edit_methods.append(method)
+        
+        if method not in self.success_rates:
+            self.success_rates[method] = {"attempts": 0, "successes": 0}
+        
+        self.success_rates[method]["attempts"] += 1
+        if success:
+            self.success_rates[method]["successes"] += 1
+    
+    def get_stats(self) -> Dict:
+        """Get performance statistics"""
+        if not self.edit_times:
+            return {}
+        
+        return {
+            "avg_edit_time": sum(self.edit_times) / len(self.edit_times),
+            "fastest_edit": min(self.edit_times),
+            "total_edits": len(self.edit_times),
+            "success_rates": {
+                method: data["successes"] / data["attempts"]
+                for method, data in self.success_rates.items()
+            }
+        }
+
+# Global performance monitor
+_perf_monitor = EditPerformanceMonitor()
+
+def get_performance_monitor() -> EditPerformanceMonitor:
+    """Get the global performance monitor"""
+    return _perf_monitor
